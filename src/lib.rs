@@ -20,7 +20,7 @@ pub use peripherals::{
     EepromMemoryBackend, ExternalClockListener, ExternalInterrupt, GpioListener, IoPort,
     ListenerId, NoopTwiEventHandler, PinChangeInterrupt, PinOverrideMode, PinState, PortConfig,
     Spi, SpiConfig, SpiTransferCallback, Timer, TimerConfig, Twi, TwiConfig, TwiContext,
-    TwiEventHandler, Usart, UsartConfig, Watchdog, WatchdogConfig, INT0, INT1, PCINT0, PCINT1,
+    TwiEventHandler, Usart, UsartConfig, Usi, Watchdog, WatchdogConfig, INT0, INT1, PCINT0, PCINT1,
     PCINT2,
 };
 
