@@ -65,3 +65,9 @@ cargo run --bin avr8rs-cli -- --bin firmware.bin --cycles 1000000
 
 `--trace-pins` prints digital pin transitions; serial bytes are written to
 stdout as they are transmitted.
+
+## Differential testing
+
+`tools/differential/compare.mjs` runs random ALU/register programs through
+upstream avr8js 0.21.1 and the Rust CPU, then compares PC, cycles, SREG, SP, and
+the register file. See `tools/differential/README.md`.

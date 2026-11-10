@@ -2,3 +2,4 @@
 .superpowers/
 /target
 Cargo.lock
+node_modules/

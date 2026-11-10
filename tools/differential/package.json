@@ -1,0 +1,11 @@
+{
+  "name": "avr8rs-differential",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "compare": "node compare.mjs"
+  },
+  "dependencies": {
+    "avr8js": "0.21.1"
+  }
+}

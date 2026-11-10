@@ -289,24 +289,32 @@ impl CpuState {
     }
 
     pub fn data_byte(&self, addr: u16) -> u8 {
-        self.data[addr as usize]
+        self.data.get(addr as usize).copied().unwrap_or(0)
     }
 
     pub fn set_data_byte(&mut self, addr: u16, value: u8) {
-        self.data[addr as usize] = value;
+        if let Some(byte) = self.data.get_mut(addr as usize) {
+            *byte = value;
+        }
     }
 
     pub fn read_u16(&self, addr: u16) -> u16 {
-        let addr = addr as usize;
-        u16::from_le_bytes([self.data[addr], self.data[addr + 1]])
+        u16::from_le_bytes([self.data_byte(addr), self.data_byte(addr.wrapping_add(1))])
     }
 
     pub fn write_u16(&mut self, addr: u16, value: u16) {
-        let addr = addr as usize;
-        self.data[addr..addr + 2].copy_from_slice(&value.to_le_bytes());
+        if addr as usize + 1 >= self.data.len() {
+            return;
+        }
+        let bytes = value.to_le_bytes();
+        self.set_data_byte(addr, bytes[0]);
+        self.set_data_byte(addr.wrapping_add(1), bytes[1]);
     }
 
     pub fn read_data(&mut self, addr: u16) -> u8 {
+        if addr as usize >= self.data.len() {
+            return 0;
+        }
         if addr >= 32 {
             let hook = self
                 .read_hooks
@@ -329,6 +337,9 @@ impl CpuState {
     }
 
     pub fn write_data_masked(&mut self, addr: u16, value: u8, mask: u8) {
+        if addr as usize >= self.data.len() {
+            return;
+        }
         let hook = self
             .write_hooks
             .get_mut(addr as usize)
