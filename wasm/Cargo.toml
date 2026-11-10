@@ -1,0 +1,13 @@
+[package]
+name = "avr8rs-wasm"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "WebAssembly bindings for avr8rs"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+avr8rs = { path = ".." }
+wasm-bindgen = "0.2"

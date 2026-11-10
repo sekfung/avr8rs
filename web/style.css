@@ -1,0 +1,12 @@
+:root { color-scheme: dark; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+body { margin: 0; background: #0d1117; color: #e6edf3; }
+main { width: min(720px, 90vw); margin: 4rem auto; }
+h1 { font-size: 3rem; margin: 0 0 .25rem; letter-spacing: -.05em; }
+p { color: #8b949e; }
+.board { display: flex; align-items: center; justify-content: space-between; margin: 2rem 0; padding: 2rem; border: 1px solid #30363d; border-radius: 16px; background: #161b22; }
+.led { width: 72px; height: 72px; border-radius: 50%; background: #21262d; box-shadow: inset 0 0 0 6px #30363d; transition: background .08s, box-shadow .08s; }
+.led.on { background: #ff4d2e; box-shadow: 0 0 40px #ff4d2e99, inset 0 0 0 6px #ff8a70; }
+.meta { display: flex; flex-direction: column; gap: .35rem; color: #8b949e; }
+.controls { display: flex; gap: 1rem; align-items: center; }
+button { background: #238636; border: 0; color: white; padding: .6rem 1.2rem; border-radius: 8px; font: inherit; cursor: pointer; }
+pre { margin-top: 2rem; min-height: 3rem; padding: 1rem; border: 1px solid #30363d; border-radius: 8px; color: #7ee787; }

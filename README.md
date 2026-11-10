@@ -71,3 +71,13 @@ stdout as they are transmitted.
 `tools/differential/compare.mjs` runs random ALU/register programs through
 upstream avr8js 0.21.1 and the Rust CPU, then compares PC, cycles, SREG, SP, and
 the register file. See `tools/differential/README.md`.
+
+## WebAssembly demo
+
+`wasm/` contains wasm-bindgen bindings around the Uno board model, and `web/`
+contains a blink demo with prebuilt bindings. Serve `web/` with any static HTTP
+server:
+
+```bash
+cd web && python3 -m http.server 8080
+```

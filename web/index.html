@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>avr8rs — Arduino Uno demo</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main>
+      <h1>avr8rs</h1>
+      <p>An ATmega328P blink sketch running in WebAssembly.</p>
+      <section class="board">
+        <div id="led" class="led" aria-label="pin 13 LED"></div>
+        <div class="meta"><span id="pc">PC 0x0000</span><span id="cycles">0 cycles</span></div>
+      </section>
+      <section class="controls">
+        <button id="toggle">Pause</button>
+        <label>Speed <input id="speed" type="range" min="1" max="20" value="8" /></label>
+      </section>
+      <pre id="serial"></pre>
+    </main>
+    <script type="module" src="demo.js"></script>
+  </body>
+</html>
