@@ -1,0 +1,13 @@
+[package]
+name = "avr8rs"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+license = "MIT"
+description = "Rust port of the avr8js AVR8 simulator"
+
+[lib]
+name = "avr8rs"
+path = "src/lib.rs"
+
+[dependencies]
