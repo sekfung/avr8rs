@@ -195,7 +195,10 @@ impl WatchdogState {
             }
             if (wdtcsr & WDTCSR_WDE) != 0 {
                 if (wdtcsr & WDTCSR_WDIE) != 0 {
-                    state.set_data_byte(self.config.wdtcsr, wdtcsr & !WDTCSR_WDIE);
+                    // Re-read WDTCSR so the WDIF bit set above is preserved, matching
+                    // the upstream read-modify-write of the live register value.
+                    let current = state.data_byte(self.config.wdtcsr);
+                    state.set_data_byte(self.config.wdtcsr, current & !WDTCSR_WDIE);
                 } else {
                     state.reset();
                     self.scheduled = false;
@@ -236,6 +239,7 @@ mod tests {
     const WDCE: u8 = 1 << 4;
     const WDP3: u8 = 1 << 5;
     const WDIE: u8 = 1 << 6;
+    const WDIF: u8 = 1 << 7;
 
     const INT_WDT: u32 = 0xc;
 
@@ -391,9 +395,13 @@ mod tests {
         cpu.add_cycles(16000 * 8);
         runner.run_instructions(1);
 
-        // Now we skip an extra 8ms. Watchdog should fire and jump to the interrupt
-        // handler
+        // Now we skip an extra 8ms. Fire the timeout while global interrupts are
+        // still disabled, so the WDIF bit is observable before the handler runs.
         cpu.add_cycles(16000 * 8);
+        cpu.tick();
+        assert_eq!(cpu.read_data(WDTCSR) & (WDIF | WDIE), WDIF);
+
+        // Enabling interrupts should jump to the watchdog interrupt handler.
         runner.run_instructions(1);
 
         assert_eq!(cpu.pc(), INT_WDT);
