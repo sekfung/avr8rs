@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
 use crate::cpu::{Cpu, CpuState, InterruptConfig};
 
@@ -218,7 +218,7 @@ pub fn port_l_config() -> PortConfig {
 }
 
 struct IoPortState {
-    cpu: Cpu,
+    cpu: Weak<RefCell<CpuState>>,
     config: PortConfig,
     external_ints: Vec<Option<InterruptConfig>>,
     pcint: Option<InterruptConfig>,
@@ -266,7 +266,7 @@ impl IoPortState {
         });
 
         Self {
-            cpu,
+            cpu: cpu.downgrade(),
             config,
             external_ints,
             pcint,
@@ -448,7 +448,8 @@ impl IoPort {
     }
 
     fn cpu(&self) -> Cpu {
-        self.0.borrow().cpu.clone()
+        Cpu::from_weak(&self.0.borrow().cpu)
+            .expect("CPU was dropped while its GPIO port is still in use")
     }
 
     fn register_with_cpu(&self) {

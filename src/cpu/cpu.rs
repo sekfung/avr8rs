@@ -1,5 +1,5 @@
 use std::cell::{Ref, RefCell, RefMut};
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
 use crate::peripherals::gpio::IoPort;
 
@@ -60,6 +60,14 @@ pub struct CpuState {
 impl Cpu {
     pub fn new(prog_mem: Vec<u16>) -> Self {
         Self::with_sram(prog_mem, DEFAULT_SRAM_BYTES)
+    }
+
+    pub(crate) fn downgrade(&self) -> Weak<RefCell<CpuState>> {
+        Rc::downgrade(&self.0)
+    }
+
+    pub(crate) fn from_weak(cpu: &Weak<RefCell<CpuState>>) -> Option<Self> {
+        cpu.upgrade().map(Cpu)
     }
 
     pub fn with_sram(prog_mem: Vec<u16>, sram_bytes: usize) -> Self {
