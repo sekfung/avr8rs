@@ -5,6 +5,7 @@ pub(crate) mod gpio;
 pub(crate) mod spi;
 pub(crate) mod timer;
 pub(crate) mod timer_attiny;
+pub(crate) mod twi;
 
 pub use adc::{
     adc_config, atmega328_channels, Adc, AdcConfig, AdcMuxConfiguration, AdcMuxInput,
@@ -21,3 +22,4 @@ pub use gpio::{
 pub use spi::{spi_config, Spi, SpiConfig, SpiTransferCallback};
 pub use timer::{timer0_config, timer1_config, timer2_config, Timer, TimerConfig};
 pub use timer_attiny::{attiny_timer1_config, AttinyTimer1, AttinyTimer1Config};
+pub use twi::{twi_config, NoopTwiEventHandler, Twi, TwiConfig, TwiContext, TwiEventHandler};
