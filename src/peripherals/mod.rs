@@ -2,6 +2,7 @@ pub(crate) mod adc;
 pub(crate) mod clock;
 pub(crate) mod eeprom;
 pub(crate) mod gpio;
+pub(crate) mod timer;
 
 pub use adc::{
     adc_config, atmega328_channels, Adc, AdcConfig, AdcMuxConfiguration, AdcMuxInput,
@@ -15,3 +16,4 @@ pub use gpio::{
     ExternalClockListener, ExternalInterrupt, GpioListener, IoPort, ListenerId, PinChangeInterrupt,
     PinOverrideMode, PinState, PortConfig, INT0, INT1, PCINT0, PCINT1, PCINT2,
 };
+pub use timer::{timer0_config, timer1_config, timer2_config, Timer, TimerConfig};
