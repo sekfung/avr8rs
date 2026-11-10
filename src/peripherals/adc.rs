@@ -125,6 +125,11 @@ pub struct AdcState {
 }
 
 impl AdcState {
+    /// Returns the reference voltage using the currently stored CPU handle.
+    ///
+    /// Do not call this method from an `on_adc_read` callback, because the CPU
+    /// state is already mutably borrowed there. Use [`Self::reference_voltage_with`]
+    /// with the callback's `CpuState` instead.
     pub fn reference_voltage(&self) -> f64 {
         let cpu = self
             .cpu
@@ -132,6 +137,28 @@ impl AdcState {
             .expect("CPU was dropped while its ADC is still in use");
         let value = reference_voltage_for(&cpu.borrow(), self);
         value
+    }
+
+    /// Returns the reference voltage using the supplied CPU state.
+    ///
+    /// This is the callback-safe variant for use inside `on_adc_read`.
+    pub fn reference_voltage_with(&self, cpu: &CpuState) -> f64 {
+        reference_voltage_for(cpu, self)
+    }
+
+    /// Returns the current ADC prescaler using the supplied CPU state.
+    ///
+    /// This is the callback-safe variant for use inside `on_adc_read`.
+    pub fn prescaler_with(&self, cpu: &CpuState) -> u32 {
+        prescaler_for(cpu, &self.config)
+    }
+
+    /// Returns the current conversion length in CPU cycles using the supplied
+    /// CPU state.
+    ///
+    /// This is the callback-safe variant for use inside `on_adc_read`.
+    pub fn sample_cycles_with(&self, cpu: &CpuState) -> u64 {
+        self.conversion_cycles * self.prescaler_with(cpu) as u64
     }
 }
 
@@ -190,15 +217,14 @@ impl Adc {
                     }
                     AdcMuxInput::Temperature => 0.378125,
                 };
-                let reference = reference_voltage_for(cpu, state);
+                let reference = state.reference_voltage_with(cpu);
                 let raw_value = voltage / reference * 1024.0;
                 let result = if raw_value.is_nan() {
                     0
                 } else {
                     raw_value.floor().clamp(0.0, 1023.0) as u16
                 };
-                let sample_cycles =
-                    state.conversion_cycles * prescaler_for(cpu, &state.config) as u64;
+                let sample_cycles = state.sample_cycles_with(cpu);
                 let adc_weak = adc_weak.clone();
                 cpu.add_clock_event(
                     Box::new(move |cpu| {
@@ -249,10 +275,18 @@ impl Adc {
         self.0.borrow_mut().aref = value;
     }
 
+    /// Returns the current reference voltage.
+    ///
+    /// Use [`AdcState::reference_voltage_with`] inside `on_adc_read`, where the
+    /// CPU state is already borrowed.
     pub fn reference_voltage(&self) -> f64 {
         self.0.borrow().reference_voltage()
     }
 
+    /// Returns the current ADC prescaler.
+    ///
+    /// Use [`AdcState::prescaler_with`] inside `on_adc_read`, where the CPU
+    /// state is already borrowed.
     pub fn prescaler(&self) -> u32 {
         let state = self.0.borrow();
         let cpu = state
@@ -263,6 +297,10 @@ impl Adc {
         value
     }
 
+    /// Returns the current conversion length in CPU cycles.
+    ///
+    /// Use [`AdcState::sample_cycles_with`] inside `on_adc_read`, where the CPU
+    /// state is already borrowed.
     pub fn sample_cycles(&self) -> u64 {
         let state = self.0.borrow();
         let cpu = state
@@ -429,6 +467,19 @@ mod tests {
         runner.run_instructions(5);
         let value = (cpu.data_byte(17) as u16) << 8 | cpu.data_byte(16) as u16;
         assert_eq!(value, 524);
+
+        let observed = Rc::new(RefCell::new(None));
+        let observed_in_callback = observed.clone();
+        adc.set_on_adc_read(Some(Box::new(move |state, cpu, _input| {
+            *observed_in_callback.borrow_mut() = Some((
+                state.reference_voltage_with(cpu),
+                state.prescaler_with(cpu),
+                state.sample_cycles_with(cpu),
+            ));
+        })));
+
+        cpu.write_data(0x7a, 0xc7);
+        assert_eq!(*observed.borrow(), Some((5.0, 128, 13 * 128)));
     }
 
     #[test]
