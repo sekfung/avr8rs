@@ -3,6 +3,7 @@ pub(crate) mod clock;
 pub(crate) mod eeprom;
 pub(crate) mod gpio;
 pub(crate) mod timer;
+pub(crate) mod timer_attiny;
 
 pub use adc::{
     adc_config, atmega328_channels, Adc, AdcConfig, AdcMuxConfiguration, AdcMuxInput,
@@ -17,3 +18,4 @@ pub use gpio::{
     PinOverrideMode, PinState, PortConfig, INT0, INT1, PCINT0, PCINT1, PCINT2,
 };
 pub use timer::{timer0_config, timer1_config, timer2_config, Timer, TimerConfig};
+pub use timer_attiny::{attiny_timer1_config, AttinyTimer1, AttinyTimer1Config};
