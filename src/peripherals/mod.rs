@@ -1,5 +1,9 @@
+pub(crate) mod clock;
+pub(crate) mod eeprom;
 pub(crate) mod gpio;
 
+pub use clock::{clock_config, Clock, ClockConfig};
+pub use eeprom::{eeprom_config, Eeprom, EepromBackend, EepromConfig, EepromMemoryBackend};
 pub use gpio::{
     port_a_config, port_b_config, port_c_config, port_d_config, port_e_config, port_f_config,
     port_g_config, port_h_config, port_j_config, port_k_config, port_l_config,
