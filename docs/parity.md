@@ -35,6 +35,23 @@ behaviour that upstream does not test:
 
 These do not change the `cargo test --lib` contract of exactly 347 tests.
 
+## Tooling layers
+
+- `board::ArduinoUno` maps Arduino pins 0-13 and A0-A5 to the ATmega328P
+  ports and instantiates USART0, Timer0, ADC, watchdog, and the clock.
+- `avr8rs-cli` runs raw little-endian flash images; Intel HEX loading is not
+  part of the crate.
+- `wasm/` exposes the board model through wasm-bindgen; `web/` contains a
+  self-contained blink demo with prebuilt bindings.
+- `tools/differential/compare.mjs` compares random ALU/register programs with
+  upstream avr8js 0.21.1.
+
+## Intentional deviation
+
+Malformed assembler input that upstream reports through internal JavaScript
+`TypeError`s gets a descriptive Rust error instead. This only affects the
+test-only assembler and is outside the 347 upstream cases.
+
 ## Public export map
 
 Every symbol exported by upstream `src/index.ts` has a Rust re-export. Function
