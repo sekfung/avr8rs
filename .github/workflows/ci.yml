@@ -28,3 +28,13 @@ jobs:
         run: cargo build --release
       - name: Documentation
         run: RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
+
+  wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Check WebAssembly bindings
+        run: cargo check --manifest-path wasm/Cargo.toml --target wasm32-unknown-unknown
