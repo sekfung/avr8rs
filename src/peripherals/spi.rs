@@ -47,8 +47,8 @@ struct SpiState {
     freq_hz: f64,
     transmission_active: bool,
     spi_interrupt: InterruptConfig,
-    on_transfer: Option<Box<SpiTransferCallback>>,
-    on_byte: Option<SpiByteCallback>,
+    on_transfer: Option<Rc<RefCell<Box<SpiTransferCallback>>>>,
+    on_byte: Option<Rc<RefCell<SpiByteCallback>>>,
     // Cached register values keep getters usable inside callbacks, where the
     // CPU state is already mutably borrowed.
     spcr: u8,
@@ -77,25 +77,27 @@ impl Spi {
             freq_hz,
             transmission_active: false,
             spi_interrupt,
-            on_transfer: Some(Box::new(|_| 0)),
+            on_transfer: Some(Rc::new(RefCell::new(Box::new(|_| 0)))),
             on_byte: None,
             spcr,
             spsr,
         })));
 
         let spi_weak = Rc::downgrade(&spi.0);
-        spi.0.borrow_mut().on_byte = Some(Box::new(move |state: &mut CpuState, value| {
-            let Some(spi) = spi_weak.upgrade().map(Spi) else {
-                return;
-            };
-            let received = spi.call_on_transfer(value);
-            let cycles = spi.transfer_cycles();
-            let completion = spi.clone();
-            state.add_clock_event(
-                Box::new(move |state| completion.complete_transfer_with(state, received)),
-                cycles,
-            );
-        }));
+        spi.0.borrow_mut().on_byte = Some(Rc::new(RefCell::new(Box::new(
+            move |state: &mut CpuState, value| {
+                let Some(spi) = spi_weak.upgrade().map(Spi) else {
+                    return;
+                };
+                let received = spi.call_on_transfer(value);
+                let cycles = spi.transfer_cycles();
+                let completion = spi.clone();
+                state.add_clock_event(
+                    Box::new(move |state| completion.complete_transfer_with(state, received)),
+                    cycles,
+                );
+            },
+        ))));
 
         let writer = spi.clone();
         cpu.set_write_hook(
@@ -189,28 +191,18 @@ impl Spi {
     }
 
     pub fn set_on_byte(&self, callback: Option<SpiByteCallback>) {
-        self.0.borrow_mut().on_byte = callback;
+        self.0.borrow_mut().on_byte = callback.map(|callback| Rc::new(RefCell::new(callback)));
     }
 
     pub fn set_on_transfer(&self, callback: Option<Box<SpiTransferCallback>>) {
-        self.0.borrow_mut().on_transfer = callback;
+        self.0.borrow_mut().on_transfer = callback.map(|callback| Rc::new(RefCell::new(callback)));
     }
 
     fn call_on_transfer(&self, value: u8) -> u8 {
-        let mut callback = match self.0.try_borrow_mut() {
-            Ok(mut spi) => spi.on_transfer.take(),
-            Err(_) => None,
-        };
-        let result = callback
-            .as_mut()
-            .map(|callback| callback(value))
-            .unwrap_or(0);
-        if let Ok(mut spi) = self.0.try_borrow_mut() {
-            if spi.on_transfer.is_none() {
-                spi.on_transfer = callback;
-            }
-        }
-        result
+        let callback = self.0.borrow().on_transfer.clone();
+        callback
+            .map(|callback| callback.borrow_mut()(value))
+            .unwrap_or(0)
     }
 
     fn handle_spdr_write(&self, state: &mut CpuState, value: u8) -> bool {
@@ -235,16 +227,11 @@ impl Spi {
             state.clear_interrupt(interrupt);
             spi.spsr = state.data_byte(spi.config.spsr);
             spi.transmission_active = true;
-            spi.on_byte.take()
+            spi.on_byte.clone()
         };
 
-        if let Some(mut callback) = callback {
-            callback(state, value);
-            if let Ok(mut spi) = self.0.try_borrow_mut() {
-                if spi.on_byte.is_none() {
-                    spi.on_byte = Some(callback);
-                }
-            }
+        if let Some(callback) = callback {
+            callback.borrow_mut()(state, value);
         }
         true
     }

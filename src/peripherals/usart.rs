@@ -75,10 +75,10 @@ struct UsartState {
     rxc: InterruptConfig,
     udre: InterruptConfig,
     txc: InterruptConfig,
-    on_byte_transmit: Option<ByteTransmitCallback>,
-    on_line_transmit: Option<LineTransmitCallback>,
-    on_rx_complete: Option<NotificationCallback>,
-    on_configuration_change: Option<NotificationCallback>,
+    on_byte_transmit: Option<Rc<RefCell<ByteTransmitCallback>>>,
+    on_line_transmit: Option<Rc<RefCell<LineTransmitCallback>>>,
+    on_rx_complete: Option<Rc<RefCell<NotificationCallback>>>,
+    on_configuration_change: Option<Rc<RefCell<NotificationCallback>>>,
     // The cached values keep getters usable inside callbacks, where the CPU
     // state is already mutably borrowed.
     cached: RegisterCache,
@@ -263,19 +263,23 @@ impl Usart {
     }
 
     pub fn set_on_byte_transmit(&self, callback: Option<ByteTransmitCallback>) {
-        self.0.borrow_mut().on_byte_transmit = callback;
+        self.0.borrow_mut().on_byte_transmit =
+            callback.map(|callback| Rc::new(RefCell::new(callback)));
     }
 
     pub fn set_on_line_transmit(&self, callback: Option<LineTransmitCallback>) {
-        self.0.borrow_mut().on_line_transmit = callback;
+        self.0.borrow_mut().on_line_transmit =
+            callback.map(|callback| Rc::new(RefCell::new(callback)));
     }
 
     pub fn set_on_rx_complete(&self, callback: Option<NotificationCallback>) {
-        self.0.borrow_mut().on_rx_complete = callback;
+        self.0.borrow_mut().on_rx_complete =
+            callback.map(|callback| Rc::new(RefCell::new(callback)));
     }
 
     pub fn set_on_configuration_change(&self, callback: Option<NotificationCallback>) {
-        self.0.borrow_mut().on_configuration_change = callback;
+        self.0.borrow_mut().on_configuration_change =
+            callback.map(|callback| Rc::new(RefCell::new(callback)));
     }
 
     fn reset_with_state(&self, state: &mut CpuState) {
@@ -287,12 +291,14 @@ impl Usart {
         usart.rx_busy = false;
         usart.rx_byte = 0;
         usart.line_buffer.clear();
+        let ubrrh = state.data_byte(config.ubrrh);
+        let ubrrl = state.data_byte(config.ubrrl);
         usart.cached = RegisterCache {
             ucsra: UCSRA_UDRE,
             ucsrb: 0,
             ucsrc: UCSRC_UCSZ1 | UCSRC_UCSZ0,
-            ubrrh: 0,
-            ubrrl: 0,
+            ubrrh,
+            ubrrl,
         };
     }
 
@@ -432,19 +438,15 @@ impl Usart {
     }
 
     fn call_byte_transmit(&self, value: u8) {
-        let mut callback = self.0.borrow_mut().on_byte_transmit.take();
-        if let Some(callback) = callback.as_mut() {
-            callback(value);
-        }
-        let mut usart = self.0.borrow_mut();
-        if usart.on_byte_transmit.is_none() {
-            usart.on_byte_transmit = callback;
+        let callback = self.0.borrow().on_byte_transmit.clone();
+        if let Some(callback) = callback {
+            callback.borrow_mut()(value);
         }
     }
 
     fn call_line_transmit(&self, value: u8) {
-        let mut callback = self.0.borrow_mut().on_line_transmit.take();
-        if let Some(callback) = callback.as_mut() {
+        let callback = self.0.borrow().on_line_transmit.clone();
+        if let Some(callback) = callback {
             let character = char::from(value);
             let line = {
                 let mut usart = self.0.borrow_mut();
@@ -456,34 +458,22 @@ impl Usart {
                 }
             };
             if let Some(line) = line {
-                callback(line);
+                callback.borrow_mut()(line);
             }
-        }
-        let mut usart = self.0.borrow_mut();
-        if usart.on_line_transmit.is_none() {
-            usart.on_line_transmit = callback;
         }
     }
 
     fn call_rx_complete(&self) {
-        let mut callback = self.0.borrow_mut().on_rx_complete.take();
-        if let Some(callback) = callback.as_mut() {
-            callback();
-        }
-        let mut usart = self.0.borrow_mut();
-        if usart.on_rx_complete.is_none() {
-            usart.on_rx_complete = callback;
+        let callback = self.0.borrow().on_rx_complete.clone();
+        if let Some(callback) = callback {
+            callback.borrow_mut()();
         }
     }
 
     fn call_configuration_change(&self) {
-        let mut callback = self.0.borrow_mut().on_configuration_change.take();
-        if let Some(callback) = callback.as_mut() {
-            callback();
-        }
-        let mut usart = self.0.borrow_mut();
-        if usart.on_configuration_change.is_none() {
-            usart.on_configuration_change = callback;
+        let callback = self.0.borrow().on_configuration_change.clone();
+        if let Some(callback) = callback {
+            callback.borrow_mut()();
         }
     }
 

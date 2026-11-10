@@ -1,4 +1,5 @@
 use std::cell::{Ref, RefCell, RefMut};
+use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
 use std::rc::{Rc, Weak};
 
 use crate::peripherals::gpio::IoPort;
@@ -84,6 +85,12 @@ impl Cpu {
 
     pub(crate) fn borrow_state_mut(&self) -> RefMut<'_, CpuState> {
         self.0.borrow_mut()
+    }
+
+    pub(crate) fn try_borrow_state_mut(
+        &self,
+    ) -> Result<RefMut<'_, CpuState>, std::cell::BorrowMutError> {
+        self.0.try_borrow_mut()
     }
 
     pub fn reset(&self) {
@@ -241,8 +248,6 @@ impl CpuState {
             .collect();
         let pc22_bits = prog_bytes.len() > 0x20000;
         let hook_count = data.len();
-        let gpio_by_port = std::iter::repeat_with(|| None).take(hook_count).collect();
-
         Self {
             data,
             prog_mem,
@@ -259,7 +264,7 @@ impl CpuState {
             next_interrupt: -1,
             max_interrupt: 0,
             gpio_ports: Vec::new(),
-            gpio_by_port,
+            gpio_by_port: Vec::new(),
             on_watchdog_reset: Box::new(|_| {}),
         }
     }
@@ -308,9 +313,12 @@ impl CpuState {
                 .get_mut(addr as usize)
                 .and_then(Option::take);
             if let Some(mut hook) = hook {
-                let value = hook(self, addr);
+                let result = catch_unwind(AssertUnwindSafe(|| hook(self, addr)));
                 self.read_hooks[addr as usize] = Some(hook);
-                return value;
+                match result {
+                    Ok(value) => return value,
+                    Err(payload) => resume_unwind(payload),
+                }
             }
         }
         self.data[addr as usize]
@@ -327,8 +335,14 @@ impl CpuState {
             .and_then(Option::take);
         if let Some(mut hook) = hook {
             let old_value = self.data[addr as usize];
-            let suppress = hook(self, value, old_value, addr, mask);
+            let result = catch_unwind(AssertUnwindSafe(|| {
+                hook(self, value, old_value, addr, mask)
+            }));
             self.write_hooks[addr as usize] = Some(hook);
+            let suppress = match result {
+                Ok(suppress) => suppress,
+                Err(payload) => resume_unwind(payload),
+            };
             if suppress {
                 return;
             }
@@ -599,8 +613,11 @@ impl CpuState {
 
     pub fn on_watchdog_reset(&mut self) {
         let mut callback = std::mem::replace(&mut self.on_watchdog_reset, Box::new(|_| {}));
-        callback(self);
+        let result = catch_unwind(AssertUnwindSafe(|| callback(self)));
         self.on_watchdog_reset = callback;
+        if let Err(payload) = result {
+            resume_unwind(payload);
+        }
     }
 
     fn process_interrupt(&mut self) {

@@ -233,13 +233,12 @@ struct IoPortState {
     port_value: u8,
     open_collector: u8,
     external_clock_listeners: [Option<ExternalClockCell>; 8],
+    pending_external_clock: Vec<(u8, bool)>,
+    pending_pin_sets: Vec<(u8, bool)>,
 }
 
 impl IoPortState {
     fn new(cpu: Cpu, config: PortConfig) -> Self {
-        let ddr = cpu.data_byte(config.ddr);
-        let port = cpu.data_byte(config.port);
-        let pin = cpu.data_byte(config.pin);
         let external_ints = config
             .external_interrupts
             .iter()
@@ -272,15 +271,17 @@ impl IoPortState {
             pcint,
             listeners: Vec::new(),
             next_listener_id: 1,
-            pin_value: pin,
+            pin_value: 0,
             override_mask: 0xff,
             override_value: 0,
-            last_value: port,
-            last_ddr: ddr,
-            last_pin: pin,
-            port_value: port,
+            last_value: 0,
+            last_ddr: 0,
+            last_pin: 0,
+            port_value: 0,
             open_collector: 0,
             external_clock_listeners: std::array::from_fn(|_| None),
+            pending_external_clock: Vec::new(),
+            pending_pin_sets: Vec::new(),
         }
     }
 
@@ -372,8 +373,16 @@ impl IoPort {
 
     pub fn set_pin(&self, index: u8, value: bool) {
         let cpu = self.cpu();
-        let mut state = cpu.borrow_state_mut();
+        let mut state = match cpu.try_borrow_state_mut() {
+            Ok(state) => state,
+            Err(_) => {
+                self.0.borrow_mut().pending_pin_sets.push((index, value));
+                return;
+            }
+        };
         self.set_pin_with(&mut state, index, value);
+        drop(state);
+        self.drain_pending_pin_sets(&cpu);
     }
 
     pub(crate) fn set_pin_with(&self, state: &mut CpuState, index: u8, value: bool) {
@@ -387,6 +396,23 @@ impl IoPort {
         }
         let ddr = state.data_byte(self.0.borrow().config.ddr);
         self.refresh_pin_register(state, ddr);
+    }
+
+    fn drain_pending_pin_sets(&self, cpu: &Cpu) {
+        loop {
+            let pending = self.0.borrow_mut().pending_pin_sets.pop();
+            match pending {
+                Some((index, value)) => {
+                    if let Ok(mut state) = cpu.try_borrow_state_mut() {
+                        self.set_pin_with(&mut state, index, value);
+                    } else {
+                        self.0.borrow_mut().pending_pin_sets.push((index, value));
+                        break;
+                    }
+                }
+                None => break,
+            }
+        }
     }
 
     pub fn pin_state(&self, index: u8) -> PinState {
@@ -457,9 +483,11 @@ impl IoPort {
         let port_addr = self.0.borrow().config.port;
         let mut state = cpu.borrow_state_mut();
         state.gpio_ports.push(self.clone());
-        if let Some(slot) = state.gpio_by_port.get_mut(port_addr as usize) {
-            *slot = Some(self.clone());
+        let index = port_addr as usize;
+        if state.gpio_by_port.len() <= index {
+            state.gpio_by_port.resize(index + 1, None);
         }
+        state.gpio_by_port[index] = Some(self.clone());
     }
 
     fn install_register_hooks(&self) {
@@ -664,7 +692,28 @@ impl IoPort {
     fn notify_external_clock_listener(&self, state: &mut CpuState, index: u8, value: bool) {
         let listener = self.0.borrow().external_clock_listeners[index as usize].clone();
         if let Some(listener) = listener {
-            listener.borrow_mut()(state, value);
+            match listener.try_borrow_mut() {
+                Ok(mut callback) => {
+                    callback(state, value);
+                    drop(callback);
+                    self.drain_pending_external_clock(state);
+                }
+                Err(_) => self
+                    .0
+                    .borrow_mut()
+                    .pending_external_clock
+                    .push((index, value)),
+            }
+        }
+    }
+
+    fn drain_pending_external_clock(&self, state: &mut CpuState) {
+        loop {
+            let pending = self.0.borrow_mut().pending_external_clock.pop();
+            match pending {
+                Some((index, value)) => self.notify_external_clock_listener(state, index, value),
+                None => break,
+            }
         }
     }
 }
