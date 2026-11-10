@@ -22,6 +22,19 @@ Baseline: `npx vitest run` reports 347 passing tests in 14 files
 | utils/assembler.spec.ts | assembler | 83 |
 | **Total** | | **347** |
 
+## Additional Rust coverage
+
+Beyond the 347 upstream cases, the repository keeps integration regressions for
+behaviour that upstream does not test:
+
+| File | Cases | Scope |
+|---|---:|---|
+| `tests/timer_attiny_hook_chaining.rs` | 3 | Timer0/ATtiny shared-hook chaining |
+| `tests/regressions.rs` | 6 | GPIO re-entry, hook RAII, callback lifetimes, USART reset |
+| `tests/board.rs` | 2 | Arduino Uno pin mapping and digital I/O |
+
+These do not change the `cargo test --lib` contract of exactly 347 tests.
+
 ## Public export map
 
 Every symbol exported by upstream `src/index.ts` has a Rust re-export. Function

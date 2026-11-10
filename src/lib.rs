@@ -3,7 +3,9 @@
 //!
 //! The crate exposes the same CPU and peripheral model as avr8js 0.21.1.
 
+pub mod board;
 pub mod cpu;
+pub use board::{ArduinoUno, BoardError, DigitalPinListener, PinMode};
 pub use cpu::{
     avr_instruction, avr_interrupt, ClockEventId, Cpu, CpuMemoryHook, CpuMemoryHooks, CpuReadHook,
     CpuState, CpuWriteHook, InterruptConfig,

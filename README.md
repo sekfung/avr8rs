@@ -2,12 +2,18 @@
 
 Rust port of the avr8js 0.21.1 8-bit AVR simulator core.
 
+The crate includes the upstream CPU/peripherals, an Arduino Uno board layer,
+and a small command-line runner for raw AVR flash images.
+
 ## Build and test
 
 ```bash
 cargo test --lib
 cargo clippy --all-targets -- -D warnings
 ```
+
+`cargo test --lib` runs the 347 ported upstream cases. `cargo test` also runs
+the integration regressions under `tests/`.
 
 ## Minimal usage
 
@@ -33,3 +39,29 @@ fn main() {
     avr_instruction(&cpu);
 }
 ```
+
+## Arduino Uno board layer
+
+```rust
+use avr8rs::{ArduinoUno, PinMode};
+
+let board = ArduinoUno::new(vec![0; 0x4000]);
+board.pin_mode(13, PinMode::Output).unwrap();
+board.digital_write(13, true).unwrap();
+board.run_instructions(100);
+```
+
+Pins 0-13 use Arduino numbering; A0-A5 are pins 14-19. `set_analog_input`,
+`set_serial_callback`, and `add_pin_listener` wire external components.
+
+## Command-line runner
+
+The CLI accepts a raw flash image (little-endian instruction bytes), not Intel
+HEX:
+
+```bash
+cargo run --bin avr8rs-cli -- --bin firmware.bin --cycles 1000000
+```
+
+`--trace-pins` prints digital pin transitions; serial bytes are written to
+stdout as they are transmitted.
