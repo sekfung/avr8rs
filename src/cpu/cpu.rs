@@ -1,6 +1,8 @@
 use std::cell::{Ref, RefCell, RefMut};
 use std::rc::Rc;
 
+use crate::peripherals::gpio::IoPort;
+
 use super::interrupt::avr_interrupt_state;
 
 const DEFAULT_SRAM_BYTES: usize = 8192;
@@ -50,6 +52,8 @@ pub struct CpuState {
     pending_interrupts: Vec<Option<InterruptConfig>>,
     next_interrupt: i16,
     max_interrupt: i16,
+    pub(crate) gpio_ports: Vec<IoPort>,
+    pub(crate) gpio_by_port: Vec<Option<IoPort>>,
     on_watchdog_reset: Box<dyn FnMut(&mut CpuState)>,
 }
 
@@ -219,6 +223,7 @@ impl CpuState {
             .collect();
         let pc22_bits = prog_bytes.len() > 0x20000;
         let hook_count = data.len();
+        let gpio_by_port = std::iter::repeat_with(|| None).take(hook_count).collect();
 
         Self {
             data,
@@ -235,6 +240,8 @@ impl CpuState {
             pending_interrupts: vec![None; MAX_INTERRUPTS],
             next_interrupt: -1,
             max_interrupt: 0,
+            gpio_ports: Vec::new(),
+            gpio_by_port,
             on_watchdog_reset: Box::new(|_| {}),
         }
     }
