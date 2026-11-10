@@ -56,12 +56,20 @@ Pins 0-13 use Arduino numbering; A0-A5 are pins 14-19. `set_analog_input`,
 
 ## Command-line runner
 
-The CLI accepts a raw flash image (little-endian instruction bytes), not Intel
-HEX:
+Run a raw flash image:
 
 ```bash
 cargo run --bin avr8rs-cli -- --bin firmware.bin --instructions 1000000
 ```
+
+Compile and run an arbitrary `.ino` directly with `arduino-cli`:
+
+```bash
+cargo run --bin avr8rs-cli -- --sketch Blink.ino --instructions 2000000
+```
+
+`--board` selects another FQBN (default `arduino:avr:uno`). The host needs
+`arduino-cli`, the `arduino:avr` core, and its bundled `avr-objcopy`.
 
 `--trace-pins` prints digital pin transitions; serial bytes are written to
 stdout as they are transmitted.
@@ -75,9 +83,13 @@ the register file. See `tools/differential/README.md`.
 ## WebAssembly demo
 
 `wasm/` contains wasm-bindgen bindings around the Uno board model, and `web/`
-contains a blink demo with prebuilt bindings. Serve `web/` with any static HTTP
-server:
+contains a blink demo with prebuilt bindings. Start the local compiler server
+to run arbitrary sketches from the textarea:
 
 ```bash
-cd web && python3 -m http.server 8080
+cargo run --bin avr8rs-server -- --port 8080
+# open http://127.0.0.1:8080
 ```
+
+The server exposes `POST /compile`, runs `arduino-cli` + `avr-objcopy`, and
+returns raw flash bytes to the browser.

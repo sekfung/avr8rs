@@ -7,13 +7,15 @@ const blink = new Uint8Array([
 ]);
 
 await init();
-const uno = new Uno(blink, 16_000_000);
+let uno = new Uno(blink, 16_000_000);
 const led = document.querySelector('#led');
 const pc = document.querySelector('#pc');
 const cycles = document.querySelector('#cycles');
 const serial = document.querySelector('#serial');
 const toggle = document.querySelector('#toggle');
 const speed = document.querySelector('#speed');
+const compile = document.querySelector('#compile');
+const source = document.querySelector('#source');
 let running = true;
 
 function frame() {
@@ -32,5 +34,24 @@ function frame() {
 toggle.addEventListener('click', () => {
   running = !running;
   toggle.textContent = running ? 'Pause' : 'Run';
+});
+
+compile.addEventListener('click', async () => {
+  compile.disabled = true;
+  compile.textContent = 'Compiling…';
+  try {
+    const response = await fetch('/compile', { method: 'POST', body: source.value });
+    if (!response.ok) throw new Error(await response.text());
+    const binary = new Uint8Array(await response.arrayBuffer());
+    uno = new Uno(binary, 16_000_000);
+    serial.textContent = '';
+    running = true;
+    toggle.textContent = 'Pause';
+  } catch (error) {
+    serial.textContent = `Compile failed: ${error.message}\n\nStart the local compiler server with:\n  cargo run --bin avr8rs-server`;
+  } finally {
+    compile.disabled = false;
+    compile.textContent = 'Compile & Run';
+  }
 });
 requestAnimationFrame(frame);

@@ -3,25 +3,30 @@
 use std::env;
 use std::fs;
 use std::io::{self, Write};
+use std::path::Path;
 use std::process::ExitCode;
 
-use avr8rs::ArduinoUno;
+use avr8rs::{compile_sketch, ArduinoUno, UNO_FQBN};
 
 #[derive(Debug)]
 struct Options {
-    image: String,
+    image: Option<String>,
+    sketch: Option<String>,
+    board: String,
     instructions: usize,
     frequency: u32,
     trace_pins: bool,
 }
 
 fn usage() -> &'static str {
-    "usage: avr8rs-cli --bin FILE [--instructions N] [--freq HZ] [--trace-pins]"
+    "usage: avr8rs-cli (--bin FILE | --sketch FILE.ino) [--board FQBN] [--instructions N] [--freq HZ] [--trace-pins]"
 }
 
 fn parse_args() -> Result<Options, String> {
     let mut args = env::args().skip(1);
     let mut image = None;
+    let mut sketch = None;
+    let mut board = UNO_FQBN.to_string();
     let mut instructions = 1_000_000usize;
     let mut frequency = 16_000_000u32;
     let mut trace_pins = false;
@@ -29,6 +34,8 @@ fn parse_args() -> Result<Options, String> {
         match arg.as_str() {
             "-h" | "--help" => return Err(String::new()),
             "--bin" => image = Some(args.next().ok_or("--bin requires a path")?),
+            "--sketch" => sketch = Some(args.next().ok_or("--sketch requires a path")?),
+            "--board" => board = args.next().ok_or("--board requires an FQBN")?,
             "--instructions" | "--cycles" => {
                 instructions = args
                     .next()
@@ -47,8 +54,16 @@ fn parse_args() -> Result<Options, String> {
             other => return Err(format!("unknown argument: {other}")),
         }
     }
+    if image.is_some() && sketch.is_some() {
+        return Err("choose either --bin or --sketch".into());
+    }
+    if image.is_none() && sketch.is_none() {
+        return Err("one of --bin or --sketch is required".into());
+    }
     Ok(Options {
-        image: image.ok_or("--bin is required")?,
+        image,
+        sketch,
+        board,
         instructions,
         frequency,
         trace_pins,
@@ -68,11 +83,21 @@ fn main() -> ExitCode {
         }
     };
 
-    let mut bytes = match fs::read(&options.image) {
-        Ok(bytes) => bytes,
-        Err(error) => {
-            eprintln!("cannot read {}: {error}", options.image);
-            return ExitCode::FAILURE;
+    let mut bytes = if let Some(sketch) = &options.sketch {
+        match compile_sketch(Path::new(sketch), &options.board) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                eprintln!("compile failed: {error}");
+                return ExitCode::FAILURE;
+            }
+        }
+    } else {
+        match fs::read(options.image.as_deref().expect("validated image")) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                eprintln!("cannot read image: {error}");
+                return ExitCode::FAILURE;
+            }
         }
     };
     if bytes.len() & 1 != 0 {

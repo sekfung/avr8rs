@@ -10,3 +10,4 @@ p { color: #8b949e; }
 .controls { display: flex; gap: 1rem; align-items: center; }
 button { background: #238636; border: 0; color: white; padding: .6rem 1.2rem; border-radius: 8px; font: inherit; cursor: pointer; }
 pre { margin-top: 2rem; min-height: 3rem; padding: 1rem; border: 1px solid #30363d; border-radius: 8px; color: #7ee787; }
+textarea { width: 100%; min-height: 12rem; margin-top: 1.5rem; padding: 1rem; box-sizing: border-box; border: 1px solid #30363d; border-radius: 8px; background: #161b22; color: #e6edf3; font: inherit; resize: vertical; }

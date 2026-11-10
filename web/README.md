@@ -1,16 +1,20 @@
 # Browser demo
 
-The `pkg/` directory contains the built wasm-bindgen output. Serve this
-directory over HTTP (ES modules and WebAssembly do not load from `file://`):
+The `pkg/` directory contains the built wasm-bindgen output. Start the local
+compiler/static server from the repository root:
 
 ```bash
-python3 -m http.server 8080
-# open http://localhost:8080
+cargo run --bin avr8rs-server -- --port 8080
+# open http://127.0.0.1:8080
 ```
 
-The demo runs a hand-assembled blink program on the `ArduinoUno` board model:
-PB5 (Arduino pin 13) toggles, and the page shows PC, cycle count, and serial
-output. To rebuild the bindings:
+The server hosts this directory and exposes `POST /compile`, which runs
+`arduino-cli` and `avr-objcopy` to turn the textarea sketch into raw flash
+bytes. The page then runs them on the `ArduinoUno` board model, showing PB5
+(pin 13), PC, cycle count, and serial output. The built-in blink program is
+used until you press **Compile & Run**.
+
+To rebuild the bindings:
 
 ```bash
 cd wasm

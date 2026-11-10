@@ -5,11 +5,13 @@
 
 pub mod board;
 pub mod cpu;
+pub mod sketch;
 pub use board::{ArduinoUno, BoardError, DigitalPinListener, PinMode};
 pub use cpu::{
     avr_instruction, avr_interrupt, ClockEventId, Cpu, CpuMemoryHook, CpuMemoryHooks, CpuReadHook,
     CpuState, CpuWriteHook, InterruptConfig,
 };
+pub use sketch::{compile_sketch, compile_source, SketchError, UNO_FQBN};
 
 pub mod peripherals;
 pub use peripherals::{

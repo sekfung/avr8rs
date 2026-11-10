@@ -39,8 +39,10 @@ These do not change the `cargo test --lib` contract of exactly 347 tests.
 
 - `board::ArduinoUno` maps Arduino pins 0-13 and A0-A5 to the ATmega328P
   ports and instantiates USART0, Timer0, ADC, watchdog, and the clock.
-- `avr8rs-cli` runs raw little-endian flash images; Intel HEX loading is not
-  part of the crate.
+- `avr8rs-cli` runs raw little-endian flash images and can compile arbitrary
+  `.ino` sketches through the host `arduino-cli` toolchain.
+- `avr8rs-server` serves the demo and exposes `POST /compile` for arbitrary
+  sketch text. Intel HEX parsing is not part of the crate.
 - `wasm/` exposes the board model through wasm-bindgen; `web/` contains a
   self-contained blink demo with prebuilt bindings.
 - `tools/differential/compare.mjs` compares random ALU/register programs with
