@@ -204,8 +204,10 @@ match upstream:
 
 ```rust
 Adc::new(cpu, adc_config())
-Clock::new(cpu, freq_hz, clock_config())
-Eeprom::new(cpu, backend, eeprom_config())
+Clock::new(cpu, freq_hz)                 // uses clock_config()
+Clock::with_config(cpu, freq_hz, clock_config())
+Eeprom::new(cpu, backend)                // uses eeprom_config()
+Eeprom::with_config(cpu, backend, eeprom_config())
 IoPort::new(cpu, port_b_config())
 Spi::new(cpu, spi_config(), freq_hz)
 Timer::new(cpu, timer0_config())
@@ -213,7 +215,7 @@ AttinyTimer1::new(cpu, attiny_timer1_config())
 Twi::new(cpu, twi_config(), freq_hz)
 Usart::new(cpu, usart0_config(), freq_hz)
 Usi::new(cpu, port, port_pin, data_pin, clock_pin)
-Watchdog::new(cpu, watchdog_config())
+Watchdog::new(cpu, watchdog_config(), clock)   // clock is a Clock handle
 ```
 
 `EepromBackend` is a trait with `read_memory`, `write_memory`, and
