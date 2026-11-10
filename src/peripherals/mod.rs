@@ -1,7 +1,12 @@
+pub(crate) mod adc;
 pub(crate) mod clock;
 pub(crate) mod eeprom;
 pub(crate) mod gpio;
 
+pub use adc::{
+    adc_config, atmega328_channels, Adc, AdcConfig, AdcMuxConfiguration, AdcMuxInput,
+    AdcMuxInputType, AdcReference, AdcState,
+};
 pub use clock::{clock_config, Clock, ClockConfig};
 pub use eeprom::{eeprom_config, Eeprom, EepromBackend, EepromConfig, EepromMemoryBackend};
 pub use gpio::{
