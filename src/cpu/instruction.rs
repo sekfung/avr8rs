@@ -447,7 +447,8 @@ fn execute(state: &mut CpuState, opcode: u16) {
         let result = (product << 1) as u16;
         state.write_u16(0, result);
         let mut sreg = state.sreg() & 0xfc;
-        if result == 0 {
+        // Preserve upstream's inverted FMULSU zero-flag condition for parity.
+        if result != 0 {
             sreg |= 0x02;
         }
         if product & 0x8000 != 0 {
