@@ -176,6 +176,10 @@ impl Cpu {
         self.0.borrow_mut().set_write_hook(addr, hook);
     }
 
+    pub fn take_write_hook(&self, addr: u16) -> Option<CpuWriteHook> {
+        self.0.borrow_mut().take_write_hook(addr)
+    }
+
     pub fn clear_read_hook(&self, addr: u16) {
         self.0.borrow_mut().clear_read_hook(addr);
     }
@@ -336,6 +340,12 @@ impl CpuState {
         if let Some(slot) = self.write_hooks.get_mut(addr as usize) {
             *slot = Some(hook);
         }
+    }
+
+    pub(crate) fn take_write_hook(&mut self, addr: u16) -> Option<CpuWriteHook> {
+        self.write_hooks
+            .get_mut(addr as usize)
+            .and_then(Option::take)
     }
 
     pub fn clear_read_hook(&mut self, addr: u16) {

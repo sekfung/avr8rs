@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 
-use crate::cpu::{ClockEventId, Cpu, CpuState, InterruptConfig};
+use crate::cpu::{ClockEventId, Cpu, CpuState, CpuWriteHook, InterruptConfig};
 use crate::peripherals::gpio::{IoPort, PinOverrideMode};
 
 /// Configuration for the ATtiny25/45/85 Timer/Counter1.
@@ -217,7 +217,15 @@ impl AttinyTimer1State {
         true
     }
 
-    fn handle_gtccr_write(&mut self, state: &mut CpuState, value: u8) -> bool {
+    fn handle_gtccr_write(
+        &mut self,
+        state: &mut CpuState,
+        value: u8,
+        previous: Option<&mut CpuWriteHook>,
+        old_value: u8,
+        addr: u16,
+        mask: u8,
+    ) -> bool {
         if value & FOC1A != 0 {
             self.force_compare(state, CompareChannel::A);
         }
@@ -228,20 +236,47 @@ impl AttinyTimer1State {
             self.last_cycle = state.cycles();
         }
         let value = value & !(FOC1A | FOC1B | PSR1);
-        state.set_data_byte(self.config.gtccr, value);
+        if let Some(previous) = previous {
+            previous(state, value, old_value, addr, mask);
+        } else {
+            state.set_data_byte(self.config.gtccr, value);
+        }
         self.update_comp_config(state);
         true
     }
 
-    fn handle_tifr_write(&mut self, state: &mut CpuState, value: u8) -> bool {
-        state.set_data_byte(self.config.tifr, value);
+    fn handle_tifr_write(
+        &mut self,
+        state: &mut CpuState,
+        value: u8,
+        previous: Option<&mut CpuWriteHook>,
+        old_value: u8,
+        addr: u16,
+        mask: u8,
+    ) -> bool {
+        if let Some(previous) = previous {
+            previous(state, value, old_value, addr, mask);
+        } else {
+            state.set_data_byte(self.config.tifr, value);
+        }
         state.clear_interrupt_by_flag(self.ovf_interrupt, value);
         state.clear_interrupt_by_flag(self.ocfa_interrupt, value);
         state.clear_interrupt_by_flag(self.ocfb_interrupt, value);
         true
     }
 
-    fn handle_timsk_write(&mut self, state: &mut CpuState, value: u8) -> bool {
+    fn handle_timsk_write(
+        &mut self,
+        state: &mut CpuState,
+        value: u8,
+        previous: Option<&mut CpuWriteHook>,
+        old_value: u8,
+        addr: u16,
+        mask: u8,
+    ) -> bool {
+        if let Some(previous) = previous {
+            previous(state, value, old_value, addr, mask);
+        }
         state.update_interrupt_enable(self.ovf_interrupt, value);
         state.update_interrupt_enable(self.ocfa_interrupt, value);
         state.update_interrupt_enable(self.ocfb_interrupt, value);
@@ -557,27 +592,57 @@ impl AttinyTimer1 {
             }),
         );
 
+        let mut previous_gtccr_hook = cpu.take_write_hook(config.gtccr);
         let timer = self.clone();
         cpu.set_write_hook(
             config.gtccr,
-            Box::new(move |state, value, _old_value, _addr, _mask| {
-                timer.with_state(state, |timer, state| timer.handle_gtccr_write(state, value))
+            Box::new(move |state, value, old_value, addr, mask| {
+                timer.with_state(state, |timer, state| {
+                    timer.handle_gtccr_write(
+                        state,
+                        value,
+                        previous_gtccr_hook.as_mut(),
+                        old_value,
+                        addr,
+                        mask,
+                    )
+                })
             }),
         );
 
+        let mut previous_tifr_hook = cpu.take_write_hook(config.tifr);
         let timer = self.clone();
         cpu.set_write_hook(
             config.tifr,
-            Box::new(move |state, value, _old_value, _addr, _mask| {
-                timer.with_state(state, |timer, state| timer.handle_tifr_write(state, value))
+            Box::new(move |state, value, old_value, addr, mask| {
+                timer.with_state(state, |timer, state| {
+                    timer.handle_tifr_write(
+                        state,
+                        value,
+                        previous_tifr_hook.as_mut(),
+                        old_value,
+                        addr,
+                        mask,
+                    )
+                })
             }),
         );
 
+        let mut previous_timsk_hook = cpu.take_write_hook(config.timsk);
         let timer = self.clone();
         cpu.set_write_hook(
             config.timsk,
-            Box::new(move |state, value, _old_value, _addr, _mask| {
-                timer.with_state(state, |timer, state| timer.handle_timsk_write(state, value))
+            Box::new(move |state, value, old_value, addr, mask| {
+                timer.with_state(state, |timer, state| {
+                    timer.handle_timsk_write(
+                        state,
+                        value,
+                        previous_timsk_hook.as_mut(),
+                        old_value,
+                        addr,
+                        mask,
+                    )
+                })
             }),
         );
     }
