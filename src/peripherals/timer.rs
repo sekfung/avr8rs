@@ -434,6 +434,7 @@ struct TimerState {
     external_clock_rising_edge: bool,
     high_byte_temp: u8,
     event_id: Option<ClockEventId>,
+    pending_pin_overrides: Vec<(IoPort, u8, PinOverrideMode)>,
     ovf_interrupt: InterruptConfig,
     ocfa_interrupt: InterruptConfig,
     ocfb_interrupt: InterruptConfig,
@@ -481,6 +482,7 @@ impl TimerState {
             external_clock_rising_edge: false,
             high_byte_temp: 0,
             event_id: None,
+            pending_pin_overrides: Vec::new(),
             ovf_interrupt: make_interrupt(config.ovf_interrupt, config.toie, config.tov),
             ocfa_interrupt: make_interrupt(config.comp_a_interrupt, config.ociea, config.ocfa),
             ocfb_interrupt: make_interrupt(config.comp_b_interrupt, config.ocieb, config.ocfb),
@@ -736,7 +738,7 @@ impl TimerState {
         let id = state.add_clock_event(
             Box::new(move |state| {
                 if let Some(timer) = me.upgrade() {
-                    timer.borrow_mut().count(state, true, false);
+                    Timer(timer).with_state(state, |timer, state| timer.count(state, true, false));
                 }
             }),
             delay,
@@ -750,10 +752,11 @@ impl TimerState {
             pin as usize,
             Some(Box::new(move |state, value| {
                 if let Some(timer) = me.upgrade() {
-                    let mut timer = timer.borrow_mut();
-                    if value == timer.external_clock_rising_edge {
-                        timer.count(state, false, true);
-                    }
+                    Timer(timer).with_state(state, |timer, state| {
+                        if value == timer.external_clock_rising_edge {
+                            timer.count(state, false, true);
+                        }
+                    });
                 }
             })),
         );
@@ -1030,7 +1033,7 @@ impl TimerState {
         if let Some(port) = port {
             #[cfg(test)]
             self.override_calls.push((pin, mode));
-            port.timer_override_pin_with(state, pin, mode);
+            self.pending_pin_overrides.push((port, pin, mode));
         }
     }
 
@@ -1061,12 +1064,14 @@ impl Timer {
     pub fn new(cpu: Cpu, config: TimerConfig) -> Self {
         let state = Rc::new(RefCell::new(TimerState::new(config)));
         state.borrow_mut().me = Rc::downgrade(&state);
+        let timer = Timer(state);
         {
             let mut cpu_state = cpu.borrow_state_mut();
-            state.borrow_mut().update_wgm_config(&mut cpu_state);
+            timer.with_state(&mut cpu_state, |state, cpu_state| {
+                state.update_wgm_config(cpu_state);
+            });
         }
 
-        let timer = Timer(state);
         timer.install_hooks(&cpu, config);
         timer
     }
@@ -1089,18 +1094,46 @@ impl Timer {
         self.0.borrow_mut().override_calls.clear();
     }
 
+    fn with_state<T>(
+        &self,
+        cpu_state: &mut CpuState,
+        callback: impl FnOnce(&mut TimerState, &mut CpuState) -> T,
+    ) -> T {
+        let result = callback(&mut self.0.borrow_mut(), cpu_state);
+        self.flush_pin_overrides(cpu_state);
+        result
+    }
+
+    fn flush_pin_overrides(&self, cpu_state: &mut CpuState) {
+        loop {
+            let pending = {
+                let mut state = self.0.borrow_mut();
+                std::mem::take(&mut state.pending_pin_overrides)
+            };
+            if pending.is_empty() {
+                return;
+            }
+
+            for (port, pin, mode) in pending {
+                port.timer_override_pin_with(cpu_state, pin, mode);
+            }
+        }
+    }
+
     fn install_hooks(&self, cpu: &Cpu, config: TimerConfig) {
         let timer = self.clone();
         cpu.set_read_hook(
             config.tcnt,
-            Box::new(move |state, addr| timer.0.borrow_mut().handle_tcnt_read(state, addr)),
+            Box::new(move |state, addr| {
+                timer.with_state(state, |timer, state| timer.handle_tcnt_read(state, addr))
+            }),
         );
 
         let timer = self.clone();
         cpu.set_write_hook(
             config.tcnt,
             Box::new(move |state, value, _old_value, _addr, _mask| {
-                timer.0.borrow_mut().handle_tcnt_write(state, value)
+                timer.with_state(state, |timer, state| timer.handle_tcnt_write(state, value))
             }),
         );
 
@@ -1108,7 +1141,7 @@ impl Timer {
         cpu.set_write_hook(
             config.ocra,
             Box::new(move |_state, value, _old_value, _addr, _mask| {
-                timer.0.borrow_mut().handle_ocra_write(value)
+                timer.with_state(_state, |timer, _state| timer.handle_ocra_write(value))
             }),
         );
 
@@ -1116,7 +1149,7 @@ impl Timer {
         cpu.set_write_hook(
             config.ocrb,
             Box::new(move |_state, value, _old_value, _addr, _mask| {
-                timer.0.borrow_mut().handle_ocrb_write(value)
+                timer.with_state(_state, |timer, _state| timer.handle_ocrb_write(value))
             }),
         );
 
@@ -1125,7 +1158,7 @@ impl Timer {
             cpu.set_write_hook(
                 config.ocrc,
                 Box::new(move |_state, value, _old_value, _addr, _mask| {
-                    timer.0.borrow_mut().handle_ocrc_write(value)
+                    timer.with_state(_state, |timer, _state| timer.handle_ocrc_write(value))
                 }),
             );
         }
@@ -1135,7 +1168,7 @@ impl Timer {
             cpu.set_write_hook(
                 config.icr,
                 Box::new(move |_state, value, _old_value, _addr, _mask| {
-                    timer.0.borrow_mut().handle_icr_write(value)
+                    timer.with_state(_state, |timer, _state| timer.handle_icr_write(value))
                 }),
             );
 
@@ -1144,7 +1177,9 @@ impl Timer {
                 cpu.set_write_hook(
                     addr,
                     Box::new(move |_state, value, _old_value, _addr, _mask| {
-                        timer.0.borrow_mut().handle_temp_register_write(value)
+                        timer.with_state(_state, |timer, _state| {
+                            timer.handle_temp_register_write(value)
+                        })
                     }),
                 );
             }
@@ -1158,10 +1193,9 @@ impl Timer {
                 cpu.set_write_hook(
                     addr,
                     Box::new(move |state, value, _old_value, addr, _mask| {
-                        timer
-                            .0
-                            .borrow_mut()
-                            .handle_ocr_high_write(state, value, addr)
+                        timer.with_state(state, |timer, state| {
+                            timer.handle_ocr_high_write(state, value, addr)
+                        })
                     }),
                 );
             }
@@ -1171,7 +1205,7 @@ impl Timer {
         cpu.set_write_hook(
             config.tccra,
             Box::new(move |state, value, _old_value, _addr, _mask| {
-                timer.0.borrow_mut().handle_tccra_write(state, value)
+                timer.with_state(state, |timer, state| timer.handle_tccra_write(state, value))
             }),
         );
 
@@ -1179,7 +1213,7 @@ impl Timer {
         cpu.set_write_hook(
             config.tccrb,
             Box::new(move |state, value, _old_value, _addr, _mask| {
-                timer.0.borrow_mut().handle_tccrb_write(state, value)
+                timer.with_state(state, |timer, state| timer.handle_tccrb_write(state, value))
             }),
         );
 
@@ -1188,7 +1222,7 @@ impl Timer {
             cpu.set_write_hook(
                 config.tccrc,
                 Box::new(move |state, value, _old_value, _addr, _mask| {
-                    timer.0.borrow_mut().handle_tccrc_write(state, value)
+                    timer.with_state(state, |timer, state| timer.handle_tccrc_write(state, value))
                 }),
             );
         }
@@ -1197,7 +1231,7 @@ impl Timer {
         cpu.set_write_hook(
             config.tifr,
             Box::new(move |state, value, _old_value, _addr, _mask| {
-                timer.0.borrow_mut().handle_tifr_write(state, value)
+                timer.with_state(state, |timer, state| timer.handle_tifr_write(state, value))
             }),
         );
 
@@ -1205,7 +1239,7 @@ impl Timer {
         cpu.set_write_hook(
             config.timsk,
             Box::new(move |state, value, _old_value, _addr, _mask| {
-                timer.0.borrow_mut().handle_timsk_write(state, value)
+                timer.with_state(state, |timer, state| timer.handle_timsk_write(state, value))
             }),
         );
     }
