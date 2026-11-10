@@ -10,27 +10,27 @@ use avr8rs::ArduinoUno;
 #[derive(Debug)]
 struct Options {
     image: String,
-    cycles: usize,
+    instructions: usize,
     frequency: u32,
     trace_pins: bool,
 }
 
 fn usage() -> &'static str {
-    "usage: avr8rs-cli --bin FILE [--cycles N] [--freq HZ] [--trace-pins]"
+    "usage: avr8rs-cli --bin FILE [--instructions N] [--freq HZ] [--trace-pins]"
 }
 
 fn parse_args() -> Result<Options, String> {
     let mut args = env::args().skip(1);
     let mut image = None;
-    let mut cycles = 1_000_000usize;
+    let mut instructions = 1_000_000usize;
     let mut frequency = 16_000_000u32;
     let mut trace_pins = false;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "-h" | "--help" => return Err(String::new()),
             "--bin" => image = Some(args.next().ok_or("--bin requires a path")?),
-            "--cycles" => {
-                cycles = args
+            "--instructions" | "--cycles" => {
+                instructions = args
                     .next()
                     .ok_or("--cycles requires a number")?
                     .parse()
@@ -49,7 +49,7 @@ fn parse_args() -> Result<Options, String> {
     }
     Ok(Options {
         image: image.ok_or("--bin is required")?,
-        cycles,
+        instructions,
         frequency,
         trace_pins,
     })
@@ -100,7 +100,7 @@ fn main() -> ExitCode {
         }
     }
 
-    board.run_instructions(options.cycles);
+    board.run_instructions(options.instructions);
     let _ = io::stdout().flush();
     eprintln!(
         "\n[avr8rs] cycles={} pc=0x{:04x}",

@@ -60,7 +60,7 @@ The CLI accepts a raw flash image (little-endian instruction bytes), not Intel
 HEX:
 
 ```bash
-cargo run --bin avr8rs-cli -- --bin firmware.bin --cycles 1000000
+cargo run --bin avr8rs-cli -- --bin firmware.bin --instructions 1000000
 ```
 
 `--trace-pins` prints digital pin transitions; serial bytes are written to
