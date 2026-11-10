@@ -12,6 +12,12 @@ const MAX_INTERRUPTS: usize = 128;
 pub type CpuReadHook = Box<dyn FnMut(&mut CpuState, u16) -> u8>;
 pub type CpuWriteHook = Box<dyn FnMut(&mut CpuState, u8, u8, u16, u8) -> bool>;
 
+/// Upstream-compatible name for a memory write hook.
+pub type CpuMemoryHook = CpuWriteHook;
+
+/// Sparse-by-address memory write hook table, matching upstream `CPUMemoryHooks`.
+pub type CpuMemoryHooks = Vec<Option<CpuMemoryHook>>;
+
 type ClockEventCallback = Rc<RefCell<Box<dyn FnMut(&mut CpuState)>>>;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

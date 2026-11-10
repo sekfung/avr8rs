@@ -5,8 +5,8 @@
 
 pub mod cpu;
 pub use cpu::{
-    avr_instruction, avr_interrupt, ClockEventId, Cpu, CpuReadHook, CpuState, CpuWriteHook,
-    InterruptConfig,
+    avr_instruction, avr_interrupt, ClockEventId, Cpu, CpuMemoryHook, CpuMemoryHooks, CpuReadHook,
+    CpuState, CpuWriteHook, InterruptConfig,
 };
 
 pub mod peripherals;

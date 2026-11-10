@@ -21,3 +21,84 @@ Baseline: `npx vitest run` reports 347 passing tests in 14 files
 | peripherals/watchdog.spec.ts | peripherals::watchdog | 6 |
 | utils/assembler.spec.ts | assembler | 83 |
 | **Total** | | **347** |
+
+## Public export map
+
+Every symbol exported by upstream `src/index.ts` has a Rust re-export. Function
+entries use `()`; type entries include structs, enums, traits, and aliases that
+correspond to upstream classes, interfaces, and TypeScript types.
+
+| Upstream export | Rust export | Kind |
+|---|---|---|
+| `CPU` | `Cpu` | struct |
+| `CPUMemoryHook` | `CpuMemoryHook` | type alias |
+| `CPUMemoryHooks` | `CpuMemoryHooks` | type alias |
+| `avrInstruction` | `avr_instruction` | function |
+| `avrInterrupt` | `avr_interrupt` | function |
+| `ADCMuxInputType` | `AdcMuxInputType` | enum |
+| `ADCReference` | `AdcReference` | enum |
+| `AVRADC` | `Adc` | struct |
+| `adcConfig` | `adc_config()` | function |
+| `atmega328Channels` | `atmega328_channels()` | function |
+| `ADCConfig` | `AdcConfig` | struct |
+| `ADCMuxConfiguration` | `AdcMuxConfiguration` | type alias |
+| `ADCMuxInput` | `AdcMuxInput` | enum |
+| `AVRClock` | `Clock` | struct |
+| `clockConfig` | `clock_config()` | function |
+| `AVRClockConfig` | `ClockConfig` | struct |
+| `AVREEPROM` | `Eeprom` | struct |
+| `EEPROMMemoryBackend` | `EepromMemoryBackend` | struct |
+| `eepromConfig` | `eeprom_config()` | function |
+| `AVREEPROMConfig` | `EepromConfig` | struct |
+| `EEPROMBackend` | `EepromBackend` | trait |
+| `AVRIOPort` | `IoPort` | struct |
+| `INT0` | `INT0` | constant |
+| `INT1` | `INT1` | constant |
+| `PCINT0` | `PCINT0` | constant |
+| `PCINT1` | `PCINT1` | constant |
+| `PCINT2` | `PCINT2` | constant |
+| `PinState` | `PinState` | enum |
+| `portAConfig` | `port_a_config()` | function |
+| `portBConfig` | `port_b_config()` | function |
+| `portCConfig` | `port_c_config()` | function |
+| `portDConfig` | `port_d_config()` | function |
+| `portEConfig` | `port_e_config()` | function |
+| `portFConfig` | `port_f_config()` | function |
+| `portGConfig` | `port_g_config()` | function |
+| `portHConfig` | `port_h_config()` | function |
+| `portJConfig` | `port_j_config()` | function |
+| `portKConfig` | `port_k_config()` | function |
+| `portLConfig` | `port_l_config()` | function |
+| `AVRExternalInterrupt` | `ExternalInterrupt` | struct |
+| `AVRPinChangeInterrupt` | `PinChangeInterrupt` | struct |
+| `AVRPortConfig` | `PortConfig` | struct |
+| `GPIOListener` | `GpioListener` | type alias |
+| `AVRSPI` | `Spi` | struct |
+| `spiConfig` | `spi_config()` | function |
+| `SPIConfig` | `SpiConfig` | struct |
+| `SPITransferCallback` | `SpiTransferCallback` | type alias |
+| `AVRTimer` | `Timer` | struct |
+| `timer0Config` | `timer0_config()` | function |
+| `timer1Config` | `timer1_config()` | function |
+| `timer2Config` | `timer2_config()` | function |
+| `AVRTimerConfig` | `TimerConfig` | struct |
+| `ATtinyTimer1` | `AttinyTimer1` | struct |
+| `attinyTimer1Config` | `attiny_timer1_config()` | function |
+| `ATtinyTimer1Config` | `AttinyTimer1Config` | struct |
+| `TWIEventHandler` | `TwiEventHandler` | trait |
+| `TWIConfig` | `TwiConfig` | struct |
+| `twiConfig` | `twi_config()` | function |
+| `NoopTWIEventHandler` | `NoopTwiEventHandler` | struct |
+| `AVRTWI` | `Twi` | struct |
+| `AVRUSART` | `Usart` | struct |
+| `usart0Config` | `usart0_config()` | function |
+| `AVRUSI` | `Usi` | struct |
+| `AVRWatchdog` | `Watchdog` | struct |
+| `watchdogConfig` | `watchdog_config()` | function |
+| `WatchdogConfig` | `WatchdogConfig` | struct |
+
+Rust also exposes a small number of supporting names required by the ownership
+model or callback API (`ClockEventId`, `CpuState`, `CpuReadHook`, `CpuWriteHook`,
+`InterruptConfig`, `AdcState`, `ExternalClockListener`, `ListenerId`,
+`PinOverrideMode`, `TwiContext`, and `UsartConfig`). These are documented in the
+design spec and do not replace any upstream export.
