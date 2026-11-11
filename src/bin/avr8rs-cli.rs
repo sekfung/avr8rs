@@ -6,27 +6,25 @@ use std::io::{self, Write};
 use std::path::Path;
 use std::process::ExitCode;
 
-use avr8rs::{compile_sketch, ArduinoUno, UNO_FQBN};
+use avr8rs::{compile_sketch, ArduinoUno, UNO_FLASH_WORDS, UNO_FQBN};
 
 #[derive(Debug)]
 struct Options {
     image: Option<String>,
     sketch: Option<String>,
-    board: String,
     instructions: usize,
     frequency: u32,
     trace_pins: bool,
 }
 
 fn usage() -> &'static str {
-    "usage: avr8rs-cli (--bin FILE | --sketch FILE.ino) [--board FQBN] [--instructions N] [--freq HZ] [--trace-pins]"
+    "usage: avr8rs-cli (--bin FILE | --sketch FILE.ino) [--board arduino:avr:uno] [--instructions N] [--freq HZ] [--trace-pins]"
 }
 
 fn parse_args() -> Result<Options, String> {
     let mut args = env::args().skip(1);
     let mut image = None;
     let mut sketch = None;
-    let mut board = UNO_FQBN.to_string();
     let mut instructions = 1_000_000usize;
     let mut frequency = 16_000_000u32;
     let mut trace_pins = false;
@@ -35,7 +33,12 @@ fn parse_args() -> Result<Options, String> {
             "-h" | "--help" => return Err(String::new()),
             "--bin" => image = Some(args.next().ok_or("--bin requires a path")?),
             "--sketch" => sketch = Some(args.next().ok_or("--sketch requires a path")?),
-            "--board" => board = args.next().ok_or("--board requires an FQBN")?,
+            "--board" => {
+                let board = args.next().ok_or("--board requires an FQBN")?;
+                if board != UNO_FQBN {
+                    return Err(format!("unsupported board {board}; expected {UNO_FQBN}"));
+                }
+            }
             "--instructions" | "--cycles" => {
                 instructions = args
                     .next()
@@ -63,7 +66,6 @@ fn parse_args() -> Result<Options, String> {
     Ok(Options {
         image,
         sketch,
-        board,
         instructions,
         frequency,
         trace_pins,
@@ -84,7 +86,7 @@ fn main() -> ExitCode {
     };
 
     let mut bytes = if let Some(sketch) = &options.sketch {
-        match compile_sketch(Path::new(sketch), &options.board) {
+        match compile_sketch(Path::new(sketch), UNO_FQBN) {
             Ok(bytes) => bytes,
             Err(error) => {
                 eprintln!("compile failed: {error}");
@@ -103,23 +105,23 @@ fn main() -> ExitCode {
     if bytes.len() & 1 != 0 {
         bytes.push(0xff);
     }
-    if bytes.len() > 0x4000 * 2 {
+    if bytes.len() > UNO_FLASH_WORDS * 2 {
         eprintln!("image is larger than the ATmega328P flash");
         return ExitCode::FAILURE;
     }
 
-    let board = ArduinoUno::with_frequency(vec![0; 0x4000], options.frequency);
+    let board = ArduinoUno::with_frequency(vec![0; UNO_FLASH_WORDS], options.frequency);
     board.cpu().write_prog_bytes(&bytes, 0);
     board.set_serial_callback(Some(Box::new(|byte| {
-        print!("{}", char::from(byte));
-        let _ = io::stdout().flush();
+        let mut stdout = io::stdout().lock();
+        let _ = stdout.write_all(&[byte]).and_then(|()| stdout.flush());
     })));
     if options.trace_pins {
         for pin in 0u8..=13 {
             let _ = board.add_pin_listener(
                 pin,
                 Box::new(move |_state, high, _old| {
-                    println!("\n[pin {pin}] {}", if high { "HIGH" } else { "LOW" });
+                    eprintln!("\n[pin {pin}] {}", if high { "HIGH" } else { "LOW" });
                 }),
             );
         }

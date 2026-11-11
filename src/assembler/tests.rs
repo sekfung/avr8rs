@@ -47,6 +47,15 @@ fn should_support_labels() {
 }
 
 #[test]
+fn should_preserve_words_after_assembling_a_lower_address() {
+    let result = assemble("_LOC 0x100\n_IW 0x1234\n_LOC 0\nNOP");
+    assert!(result.errors.is_empty(), "{:?}", result.errors);
+    assert_eq!(result.bytes.len(), 0x102);
+    assert_eq!(result.bytes[..2], [0, 0]);
+    assert_eq!(result.bytes[0x100..], [0x34, 0x12]);
+}
+
+#[test]
 fn should_support_multi_line_programs() {
     let input = r#"
       start:

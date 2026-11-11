@@ -12,8 +12,8 @@ cargo test --lib
 cargo clippy --all-targets -- -D warnings
 ```
 
-`cargo test --lib` runs the 347 ported upstream cases. `cargo test` also runs
-the integration regressions under `tests/`.
+`cargo test --lib` runs the ported upstream cases and library regressions.
+`cargo test` also runs the integration regressions under `tests/`.
 
 ## Minimal usage
 
@@ -53,6 +53,8 @@ board.run_instructions(100);
 
 Pins 0-13 use Arduino numbering; A0-A5 are pins 14-19. `set_analog_input`,
 `set_serial_callback`, and `add_pin_listener` wire external components.
+The board has 2 KiB of SRAM and models GPIO, Timer0/1/2, USART0, ADC, the
+watchdog, and the clock prescaler.
 
 ## Command-line runner
 
@@ -62,17 +64,19 @@ Run a raw flash image:
 cargo run --bin avr8rs-cli -- --bin firmware.bin --instructions 1000000
 ```
 
-Compile and run an arbitrary `.ino` directly with `arduino-cli`:
+Compile and run an Uno sketch directly with `arduino-cli`:
 
 ```bash
 cargo run --bin avr8rs-cli -- --sketch Blink.ino --instructions 2000000
 ```
 
-`--board` selects another FQBN (default `arduino:avr:uno`). The host needs
-`arduino-cli`, the `arduino:avr` core, and its bundled `avr-objcopy`.
+`--sketch` accepts the main `.ino` or the sketch directory. Both the runner
+and the demo server use `arduino:avr:uno` as their board. Install
+`arduino-cli` and the `arduino:avr` core with its bundled `avr-objcopy`.
+Set `ARDUINO_CLI` or `AVR_OBJCOPY` to an executable path to override discovery.
 
-`--trace-pins` prints digital pin transitions; serial bytes are written to
-stdout as they are transmitted.
+`--trace-pins` prints digital pin transitions to stderr. The runner writes
+serial bytes directly to stdout.
 
 ## Differential testing
 
@@ -84,7 +88,7 @@ the register file. See `tools/differential/README.md`.
 
 `wasm/` contains wasm-bindgen bindings around the Uno board model, and `web/`
 contains a blink demo with prebuilt bindings. Start the local compiler server
-to run arbitrary sketches from the textarea:
+to run Uno sketches from the textarea:
 
 ```bash
 cargo run --bin avr8rs-server -- --port 8080

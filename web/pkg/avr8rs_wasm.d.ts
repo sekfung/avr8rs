@@ -25,7 +25,7 @@ export interface InitOutput {
     readonly uno_cycles: (a: number) => number;
     readonly uno_digital_read: (a: number, b: number) => [number, number, number];
     readonly uno_digital_write: (a: number, b: number, c: number) => [number, number];
-    readonly uno_new: (a: number, b: number, c: number) => number;
+    readonly uno_new: (a: number, b: number, c: number) => [number, number, number];
     readonly uno_pc: (a: number) => number;
     readonly uno_pin_mode: (a: number, b: number, c: number) => [number, number];
     readonly uno_pin_state: (a: number, b: number) => [number, number, number];

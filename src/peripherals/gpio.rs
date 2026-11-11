@@ -1,7 +1,10 @@
 use std::cell::RefCell;
+use std::collections::VecDeque;
 use std::rc::{Rc, Weak};
 
 use crate::cpu::{Cpu, CpuState, InterruptConfig};
+
+pub(crate) type PendingPinSets = RefCell<VecDeque<(IoPort, u8, bool)>>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ExternalInterrupt {
@@ -225,6 +228,7 @@ struct IoPortState {
     listeners: Vec<(ListenerId, ListenerCell)>,
     next_listener_id: ListenerId,
     pin_value: u8,
+    driven_pins: u8,
     override_mask: u8,
     override_value: u8,
     last_value: u8,
@@ -234,7 +238,7 @@ struct IoPortState {
     open_collector: u8,
     external_clock_listeners: [Option<ExternalClockCell>; 8],
     pending_external_clock: Vec<(u8, bool)>,
-    pending_pin_sets: Vec<(u8, bool)>,
+    pending_pin_sets: Weak<PendingPinSets>,
 }
 
 impl IoPortState {
@@ -272,6 +276,7 @@ impl IoPortState {
             listeners: Vec::new(),
             next_listener_id: 1,
             pin_value: 0,
+            driven_pins: 0,
             override_mask: 0xff,
             override_value: 0,
             last_value: 0,
@@ -281,7 +286,7 @@ impl IoPortState {
             open_collector: 0,
             external_clock_listeners: std::array::from_fn(|_| None),
             pending_external_clock: Vec::new(),
-            pending_pin_sets: Vec::new(),
+            pending_pin_sets: Rc::downgrade(&cpu.borrow_state_mut().pending_pin_sets),
         }
     }
 
@@ -376,19 +381,26 @@ impl IoPort {
         let mut state = match cpu.try_borrow_state_mut() {
             Ok(state) => state,
             Err(_) => {
-                self.0.borrow_mut().pending_pin_sets.push((index, value));
+                self.0
+                    .borrow()
+                    .pending_pin_sets
+                    .upgrade()
+                    .expect("CPU owns the GPIO input queue")
+                    .borrow_mut()
+                    .push_back((self.clone(), index, value));
                 return;
             }
         };
+        state.drain_pending_pin_sets();
         self.set_pin_with(&mut state, index, value);
-        drop(state);
-        self.drain_pending_pin_sets(&cpu);
+        state.drain_pending_pin_sets();
     }
 
     pub(crate) fn set_pin_with(&self, state: &mut CpuState, index: u8, value: bool) {
         {
             let mut port_state = self.0.borrow_mut();
             let bit_mask = 1 << index;
+            port_state.driven_pins |= bit_mask;
             port_state.pin_value &= !bit_mask;
             if value {
                 port_state.pin_value |= bit_mask;
@@ -398,21 +410,14 @@ impl IoPort {
         self.refresh_pin_register(state, ddr);
     }
 
-    fn drain_pending_pin_sets(&self, cpu: &Cpu) {
-        loop {
-            let pending = self.0.borrow_mut().pending_pin_sets.pop();
-            match pending {
-                Some((index, value)) => {
-                    if let Ok(mut state) = cpu.try_borrow_state_mut() {
-                        self.set_pin_with(&mut state, index, value);
-                    } else {
-                        self.0.borrow_mut().pending_pin_sets.push((index, value));
-                        break;
-                    }
-                }
-                None => break,
-            }
+    pub(crate) fn reset_with_state(&self, state: &mut CpuState) {
+        {
+            let mut port = self.0.borrow_mut();
+            port.override_mask = 0xff;
+            port.override_value = 0;
+            port.pending_external_clock.clear();
         }
+        self.apply_write(state, 0, 0);
     }
 
     pub fn pin_state(&self, index: u8) -> PinState {
@@ -443,6 +448,7 @@ impl IoPort {
         let cpu = self.cpu();
         let mut state = cpu.borrow_state_mut();
         self.timer_override_pin_with(&mut state, index, mode);
+        state.drain_pending_pin_sets();
     }
 
     pub(crate) fn timer_override_pin_with(
@@ -588,26 +594,25 @@ impl IoPort {
 
         cpu.set_write_hook(
             pin_change.pcifr,
-            Box::new(move |state, value, _old_value, _addr, _mask| {
+            Box::new(move |state, value, _old_value, addr, mask| {
                 let ports = state.gpio_ports.clone();
                 for port in ports {
-                    if let Some(pcint) = port.0.borrow().pcint {
-                        state.clear_interrupt_by_flag(pcint, value);
+                    if let Some(pcint) = port.0.borrow().pcint.filter(|p| p.flag_register == addr) {
+                        state.clear_interrupt_by_flag(pcint, value & mask);
                     }
                 }
                 true
             }),
         );
 
-        let pcmsk = pin_change.pcmsk;
         cpu.set_write_hook(
-            pcmsk,
-            Box::new(move |state, value, _old_value, _addr, _mask| {
-                state.set_data_byte(pcmsk, value);
+            pin_change.pcicr,
+            Box::new(move |state, value, _old_value, addr, _mask| {
+                state.set_data_byte(addr, value);
                 let ports = state.gpio_ports.clone();
                 for port in ports {
-                    let pcint = port.0.borrow().pcint;
-                    if let Some(pcint) = pcint {
+                    if let Some(pcint) = port.0.borrow().pcint.filter(|p| p.enable_register == addr)
+                    {
                         state.update_interrupt_enable(pcint, value);
                     }
                 }
@@ -741,7 +746,8 @@ impl IoPortState {
     }
 
     fn recompute_pin(&mut self, ddr: u8) -> (u8, Vec<(u8, bool)>) {
-        let new_pin = (self.pin_value & !ddr) | (self.last_value & ddr);
+        let inputs = self.pin_value | (self.port_value & !self.driven_pins);
+        let new_pin = (inputs & !ddr) | (self.last_value & ddr);
         let old_pin = self.last_pin;
         let mut transitions = Vec::new();
         if old_pin != new_pin {
@@ -807,7 +813,7 @@ mod tests {
         let calls = record_listener(&port);
         cpu.write_data(PORTB, 0x55);
         assert_eq!(calls.calls(), vec![(0x55, 0)]);
-        assert_eq!(cpu.data_byte(PINB), 0x05);
+        assert_eq!(cpu.data_byte(PINB), 0x55); // High outputs and undriven pull-ups.
     }
 
     #[test]
@@ -838,7 +844,7 @@ mod tests {
         cpu.write_data(PORTB, 0x55);
         cpu.write_data(PINB, 0x01);
         assert!(calls.calls().contains(&(0x54, 0x55)));
-        assert_eq!(cpu.data_byte(PINB), 0x04);
+        assert_eq!(cpu.data_byte(PINB), 0x54);
     }
 
     #[test]

@@ -89,6 +89,14 @@ impl Clock {
         self.0.borrow_mut().cycles_delta = value;
     }
 
+    pub(crate) fn reset_with_state(&self, state: &CpuState) {
+        let mut clock = self.0.borrow_mut();
+        let cycles = state.cycles() as f64;
+        clock.cycles_delta = (cycles + clock.cycles_delta) * clock.prescaler_value as f64 - cycles;
+        clock.prescaler_value = 1;
+        clock.clock_enabled_cycles = 0;
+    }
+
     fn cpu(&self) -> Cpu {
         Cpu::from_weak(&self.0.borrow().cpu)
             .expect("CPU was dropped while its clock is still in use")

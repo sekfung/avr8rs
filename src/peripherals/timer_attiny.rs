@@ -256,9 +256,8 @@ impl AttinyTimer1State {
     ) -> bool {
         if let Some(previous) = previous {
             previous(state, value, old_value, addr, mask);
-        } else {
-            state.set_data_byte(self.config.tifr, value);
         }
+        let value = value & mask;
         state.clear_interrupt_by_flag(self.ovf_interrupt, value);
         state.clear_interrupt_by_flag(self.ocfa_interrupt, value);
         state.clear_interrupt_by_flag(self.ocfb_interrupt, value);

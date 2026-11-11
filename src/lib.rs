@@ -6,7 +6,7 @@
 pub mod board;
 pub mod cpu;
 pub mod sketch;
-pub use board::{ArduinoUno, BoardError, DigitalPinListener, PinMode};
+pub use board::{ArduinoUno, BoardError, DigitalPinListener, PinMode, UNO_FLASH_WORDS};
 pub use cpu::{
     avr_instruction, avr_interrupt, ClockEventId, Cpu, CpuMemoryHook, CpuMemoryHooks, CpuReadHook,
     CpuState, CpuWriteHook, InterruptConfig,

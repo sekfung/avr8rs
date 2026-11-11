@@ -219,8 +219,9 @@ pub(super) fn pass_one(input: &str) -> PassOne {
 
 pub(super) fn pass_two(lines: Vec<PendingLine>, labels: BTreeMap<String, u32>) -> AssembleResult {
     let byte_size = lines
-        .last()
+        .iter()
         .map(|line| (line.byte_offset + line.size) as usize)
+        .max()
         .unwrap_or(0);
     let mut bytes = vec![0_u8; byte_size];
     let mut errors = Vec::new();

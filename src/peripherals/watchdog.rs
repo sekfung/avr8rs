@@ -117,6 +117,15 @@ impl Watchdog {
         self.0.borrow().enabled_value
     }
 
+    pub(crate) fn reset_after_cpu(&self) {
+        let mut watchdog = self.0.borrow_mut();
+        watchdog.change_enabled_cycles = 0;
+        watchdog.watchdog_timeout = 0;
+        watchdog.enabled_value = false;
+        watchdog.scheduled = false;
+        watchdog.event_id = None;
+    }
+
     pub fn prescaler(&self) -> u32 {
         let (cpu, wdtcsr_addr) = {
             let state = self.0.borrow();

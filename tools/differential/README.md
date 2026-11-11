@@ -3,6 +3,10 @@
 Compares random ALU/register instruction sequences between upstream
 `avr8js@0.21.1` and the Rust CPU.
 
+The harness calculates the AVR bit 3 half-carry or half-borrow for generated
+arithmetic instructions before executing them. This corrects the pinned
+upstream model's half-carry bit before comparing the final register state.
+
 ```bash
 cargo build --bin avr8rs-diff
 (cd tools/differential && npm install)

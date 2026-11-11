@@ -48,7 +48,10 @@ export class Uno {
         const ptr0 = passArray8ToWasm0(image, wasm.__wbindgen_malloc);
         const len0 = WASM_VECTOR_LEN;
         const ret = wasm.uno_new(ptr0, len0, val2);
-        this.__wbg_ptr = ret;
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        this.__wbg_ptr = ret[0];
         UnoFinalization.register(this, this.__wbg_ptr, this);
         return this;
     }
@@ -113,6 +116,10 @@ if (Symbol.dispose) Uno.prototype[Symbol.dispose] = Uno.prototype.free;
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,
+        __wbg_Error_208446807d0d1e30: function(arg0, arg1) {
+            const ret = Error(getStringFromWasm0(arg0, arg1));
+            return ret;
+        },
         __wbg___wbindgen_throw_4c88d8bf264fd984: function(arg0, arg1) {
             throw new Error(getStringFromWasm0(arg0, arg1));
         },

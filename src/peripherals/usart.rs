@@ -282,7 +282,7 @@ impl Usart {
             callback.map(|callback| Rc::new(RefCell::new(callback)));
     }
 
-    fn reset_with_state(&self, state: &mut CpuState) {
+    pub(crate) fn reset_with_state(&self, state: &mut CpuState) {
         let config = self.0.borrow().config;
         state.set_data_byte(config.ucsra, UCSRA_UDRE);
         state.set_data_byte(config.ucsrb, 0);

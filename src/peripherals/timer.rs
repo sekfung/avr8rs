@@ -431,7 +431,7 @@ struct TimerState {
     counting_up: bool,
     divider: u64,
     external_clock_port: Option<IoPort>,
-    external_clock_rising_edge: bool,
+    external_clock_edge: Option<bool>,
     high_byte_temp: u8,
     event_id: Option<ClockEventId>,
     pending_pin_overrides: Vec<(IoPort, u8, PinOverrideMode)>,
@@ -479,7 +479,7 @@ impl TimerState {
             counting_up: true,
             divider: 0,
             external_clock_port: None,
-            external_clock_rising_edge: false,
+            external_clock_edge: None,
             high_byte_temp: 0,
             event_id: None,
             pending_pin_overrides: Vec::new(),
@@ -714,10 +714,10 @@ impl TimerState {
     }
 
     fn handle_tifr_write(&mut self, state: &mut CpuState, value: u8) -> bool {
-        state.set_data_byte(self.config.tifr, value);
         state.clear_interrupt_by_flag(self.ovf_interrupt, value);
         state.clear_interrupt_by_flag(self.ocfa_interrupt, value);
         state.clear_interrupt_by_flag(self.ocfb_interrupt, value);
+        state.clear_interrupt_by_flag(self.ocfc_interrupt, value);
         true
     }
 
@@ -753,13 +753,20 @@ impl TimerState {
             Some(Box::new(move |state, value| {
                 if let Some(timer) = me.upgrade() {
                     Timer(timer).with_state(state, |timer, state| {
-                        if value == timer.external_clock_rising_edge {
+                        if Some(value) == timer.external_clock_edge {
                             timer.count(state, false, true);
                         }
                     });
                 }
             })),
         );
+    }
+
+    fn detach_external_clock_listener(&mut self) {
+        if let (Some(_), Some(port)) = (self.external_clock_edge.take(), &self.external_clock_port)
+        {
+            port.set_external_clock_listener(self.config.external_clock_pin as usize, None);
+        }
     }
 
     fn count(&mut self, state: &mut CpuState, reschedule: bool, external: bool) {
@@ -832,9 +839,7 @@ impl TimerState {
                     .get(self.config.external_clock_port as usize)
                     .and_then(Clone::clone);
             }
-            if let Some(port) = self.external_clock_port.clone() {
-                port.set_external_clock_listener(self.config.external_clock_pin as usize, None);
-            }
+            self.detach_external_clock_listener();
             if new_divider != 0 {
                 let delay = self
                     .last_cycle
@@ -843,7 +848,7 @@ impl TimerState {
                 self.schedule_count(state, delay);
             } else if let Some(port) = self.external_clock_port.clone() {
                 if cs == 6 || cs == 7 {
-                    self.external_clock_rising_edge = cs == 7;
+                    self.external_clock_edge = Some(cs == 7);
                     self.install_external_clock_listener(&port, self.config.external_clock_pin);
                 }
             }
@@ -1080,6 +1085,14 @@ impl Timer {
         self.0.borrow_mut().reset();
     }
 
+    pub(crate) fn reset_after_cpu(&self) {
+        let mut state = self.0.borrow_mut();
+        state.detach_external_clock_listener();
+        let mut reset = TimerState::new(state.config);
+        reset.me = state.me.clone();
+        *state = reset;
+    }
+
     pub fn debug_tcnt(&self) -> u16 {
         self.0.borrow().tcnt
     }
@@ -1230,8 +1243,10 @@ impl Timer {
         let timer = self.clone();
         cpu.set_write_hook(
             config.tifr,
-            Box::new(move |state, value, _old_value, _addr, _mask| {
-                timer.with_state(state, |timer, state| timer.handle_tifr_write(state, value))
+            Box::new(move |state, value, _old_value, _addr, mask| {
+                timer.with_state(state, |timer, state| {
+                    timer.handle_tifr_write(state, value & mask)
+                })
             }),
         );
 

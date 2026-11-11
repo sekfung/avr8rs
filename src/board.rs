@@ -1,15 +1,19 @@
 //! Minimal Arduino Uno (ATmega328P) board wiring.
 //!
 //! This layer maps Arduino pin numbers to the GPIO ports and instantiates the
-//! peripherals used by the Uno: USART0, Timer0, ADC, watchdog, and the clock
+//! peripherals used by the Uno: USART0, Timer0/1/2, ADC, watchdog, and the clock
 //! prescaler. It intentionally leaves external components (LEDs, buttons,
 //! displays) to the caller.
 
 use crate::{
     adc_config, clock_config, port_b_config, port_c_config, port_d_config, timer0_config,
-    usart0_config, watchdog_config, Adc, Clock, Cpu, IoPort, ListenerId, PinState, Timer, Usart,
-    Watchdog,
+    timer1_config, timer2_config, usart0_config, watchdog_config, Adc, Clock, Cpu, IoPort,
+    ListenerId, PinState, Timer, Usart, Watchdog,
 };
+
+/// ATmega328P flash capacity in 16-bit words.
+pub const UNO_FLASH_WORDS: usize = 0x4000;
+const UNO_SRAM_BYTES: usize = 2048;
 
 /// Listener receiving `(cpu_state, high, was_high)` for one Arduino pin.
 pub type DigitalPinListener = Box<dyn FnMut(&mut crate::CpuState, bool, bool)>;
@@ -30,6 +34,8 @@ pub struct ArduinoUno {
     port_d: IoPort,
     usart: Usart,
     timer0: Timer,
+    timer1: Timer,
+    timer2: Timer,
     adc: Adc,
     watchdog: Watchdog,
     clock: Clock,
@@ -43,12 +49,14 @@ impl ArduinoUno {
 
     /// Build a board at an arbitrary CPU frequency.
     pub fn with_frequency(prog_mem: Vec<u16>, freq_hz: u32) -> Self {
-        let cpu = Cpu::new(prog_mem);
+        let cpu = Cpu::with_sram(prog_mem, UNO_SRAM_BYTES);
         let port_b = IoPort::new(cpu.clone(), port_b_config());
         let port_c = IoPort::new(cpu.clone(), port_c_config());
         let port_d = IoPort::new(cpu.clone(), port_d_config());
         let usart = Usart::new(cpu.clone(), usart0_config(), freq_hz as f64);
         let timer0 = Timer::new(cpu.clone(), timer0_config());
+        let timer1 = Timer::new(cpu.clone(), timer1_config());
+        let timer2 = Timer::new(cpu.clone(), timer2_config());
         let adc = Adc::new(cpu.clone(), adc_config());
         let clock = Clock::with_config(cpu.clone(), freq_hz, clock_config());
         let watchdog = Watchdog::new(cpu.clone(), watchdog_config(), clock.clone());
@@ -59,6 +67,8 @@ impl ArduinoUno {
             port_d,
             usart,
             timer0,
+            timer1,
+            timer2,
             adc,
             watchdog,
             clock,
@@ -89,8 +99,22 @@ impl ArduinoUno {
         &self.clock
     }
 
+    /// Reset the CPU and board peripherals, preserving SRAM, flash, and attached devices.
     pub fn reset(&self) {
-        self.cpu.reset();
+        let mut state = self.cpu.borrow_state_mut();
+        state.reset_io_registers();
+        state.reset();
+        self.clock.reset_with_state(&state);
+        self.watchdog.reset_after_cpu();
+        self.usart.reset_with_state(&mut state);
+        self.adc.reset_after_cpu();
+        for timer in [&self.timer0, &self.timer1, &self.timer2] {
+            timer.reset_after_cpu();
+        }
+        for port in [&self.port_b, &self.port_c, &self.port_d] {
+            port.reset_with_state(&mut state);
+        }
+        state.drain_pending_pin_sets();
     }
 
     pub fn run_instructions(&self, count: usize) {
@@ -139,8 +163,7 @@ impl ArduinoUno {
 
     pub fn digital_read(&self, pin: u8) -> Result<bool, BoardError> {
         let (port, index) = digital_port(pin)?;
-        let (_, pin_addr) = pin_registers(port);
-        Ok(self.cpu.read_data(pin_addr) & (1 << index) != 0)
+        Ok(self.cpu.read_data(pin_register(port)) & (1 << index) != 0)
     }
 
     pub fn pin_state(&self, pin: u8) -> Result<PinState, BoardError> {
@@ -221,10 +244,10 @@ fn port_registers(port: u8) -> (u16, u16) {
     }
 }
 
-fn pin_registers(port: u8) -> (u16, u16) {
+fn pin_register(port: u8) -> u16 {
     match port {
-        b'B' => (0x23, 0x24),
-        b'C' => (0x26, 0x27),
-        _ => (0x29, 0x2a),
+        b'B' => 0x23,
+        b'C' => 0x26,
+        _ => 0x29,
     }
 }

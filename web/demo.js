@@ -8,6 +8,7 @@ const blink = new Uint8Array([
 
 await init();
 let uno = new Uno(blink, 16_000_000);
+let serialDecoder = new TextDecoder();
 const led = document.querySelector('#led');
 const pc = document.querySelector('#pc');
 const cycles = document.querySelector('#cycles');
@@ -26,7 +27,7 @@ function frame() {
     pc.textContent = `PC 0x${uno.pc().toString(16).padStart(4, '0')}`;
     cycles.textContent = `${Math.round(uno.cycles()).toLocaleString()} cycles`;
     const bytes = uno.take_serial();
-    if (bytes.length) serial.textContent += new TextDecoder().decode(bytes);
+    if (bytes.length) serial.textContent += serialDecoder.decode(bytes, { stream: true });
   }
   requestAnimationFrame(frame);
 }
@@ -43,7 +44,10 @@ compile.addEventListener('click', async () => {
     const response = await fetch('/compile', { method: 'POST', body: source.value });
     if (!response.ok) throw new Error(await response.text());
     const binary = new Uint8Array(await response.arrayBuffer());
-    uno = new Uno(binary, 16_000_000);
+    const nextUno = new Uno(binary, 16_000_000);
+    uno.free();
+    uno = nextUno;
+    serialDecoder = new TextDecoder();
     serial.textContent = '';
     running = true;
     toggle.textContent = 'Pause';

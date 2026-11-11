@@ -11,6 +11,7 @@ pub(crate) fn avr_instruction_state(state: &mut CpuState) {
     let program_len = (state.prog_bytes().len() / 2) as u32;
     state.set_pc(state.pc().wrapping_add(1) % program_len.max(1));
     state.add_cycles(1);
+    state.drain_pending_pin_sets();
 }
 
 fn reg_d(opcode: u16) -> u16 {
@@ -82,7 +83,7 @@ fn set_sub_flags(state: &mut CpuState, val1: u8, val2: u8, result: i32) {
         sreg |= 0x01;
     }
     let half = (!(val1 as i32) & val2 as i32) | (val2 as i32 & result) | (result & !(val1 as i32));
-    if half & 1 != 0 {
+    if half & 0x08 != 0 {
         sreg |= 0x20;
     }
     state.set_sreg(sreg);
@@ -110,7 +111,7 @@ fn set_sub_carry_flags(state: &mut CpuState, val1: u8, val2: u8, result: i32, ol
         sreg |= 0x10;
     }
     let half = (!(val1 as i32) & val2 as i32) | (val2 as i32 & result) | (result & !(val1 as i32));
-    if half & 1 != 0 {
+    if half & 0x08 != 0 {
         sreg |= 0x20;
     }
     state.set_sreg(sreg);
@@ -143,7 +144,7 @@ fn execute(state: &mut CpuState, opcode: u16) {
             sreg |= 0x01;
         }
         let half = (d & r) | (r & !(result as u32)) | (!(result as u32) & d);
-        if half & 1 != 0 {
+        if half & 0x08 != 0 {
             sreg |= 0x20;
         }
         state.set_sreg(sreg);
@@ -173,7 +174,7 @@ fn execute(state: &mut CpuState, opcode: u16) {
             sreg |= 0x01;
         }
         let half = (d & r) | (r & !(result as u32)) | (!(result as u32) & d);
-        if half & 1 != 0 {
+        if half & 0x08 != 0 {
             sreg |= 0x20;
         }
         state.set_sreg(sreg);
@@ -726,7 +727,7 @@ fn execute(state: &mut CpuState, opcode: u16) {
         if result != 0 {
             sreg |= 0x01;
         }
-        if (result | value) & 1 != 0 {
+        if (result | value) & 0x08 != 0 {
             sreg |= 0x20;
         }
         state.set_sreg(sreg);
@@ -771,35 +772,22 @@ fn execute(state: &mut CpuState, opcode: u16) {
         push_return_address(state, return_address, bytes);
         state.set_pc((state.pc() as i64 + offset) as u32);
         state.add_cycles(bytes as u64);
-    } else if opcode == 0x9508 {
-        /* RET, 1001 0101 0000 1000 */
+    } else if opcode == 0x9508 || opcode == 0x9518 {
+        /* RET / RETI, 1001 0101 000i 1000 */
         let bytes: u16 = if state.pc22_bits() { 3 } else { 2 };
-        let sp = state.sp();
-        let i = sp.wrapping_add(bytes);
-        state.set_sp(i);
-        let low = state.data_byte(i) as u32;
-        let high = state.data_byte(i.wrapping_sub(1)) as u32;
-        let mut pc = ((high << 8) + low).wrapping_sub(1);
+        let sp = state.sp().wrapping_add(bytes);
+        state.set_sp(sp);
+        let low = state.data_byte(sp) as u32;
+        let high = state.data_byte(sp.wrapping_sub(1)) as u32;
+        let mut return_address = (high << 8) | low;
         if state.pc22_bits() {
-            pc |= (state.data_byte(i.wrapping_sub(2)) as u32) << 16;
+            return_address |= (state.data_byte(sp.wrapping_sub(2)) as u32) << 16;
         }
-        state.set_pc(pc);
+        state.set_pc(return_address.wrapping_sub(1));
         state.add_cycles(bytes as u64 + 1);
-    } else if opcode == 0x9518 {
-        /* RETI, 1001 0101 0001 1000 */
-        let bytes: u16 = if state.pc22_bits() { 3 } else { 2 };
-        let sp = state.sp();
-        let i = sp.wrapping_add(bytes);
-        state.set_sp(i);
-        let low = state.data_byte(i) as u32;
-        let high = state.data_byte(i.wrapping_sub(1)) as u32;
-        let mut pc = ((high << 8) + low).wrapping_sub(1);
-        if state.pc22_bits() {
-            pc |= (state.data_byte(i.wrapping_sub(2)) as u32) << 16;
+        if opcode == 0x9518 {
+            state.set_sreg(state.sreg() | 0x80);
         }
-        state.set_pc(pc);
-        state.add_cycles(bytes as u64 + 1);
-        state.set_sreg(state.sreg() | 0x80);
     } else if (opcode & 0xf000) == 0xc000 {
         /* RJMP, 1100 kkkk kkkk kkkk */
         let offset = ((opcode & 0x7ff) as i64) - if opcode & 0x800 != 0 { 0x800 } else { 0 };
@@ -881,7 +869,7 @@ fn execute(state: &mut CpuState, opcode: u16) {
         let k = (opcode & 0x0f) | ((opcode & 0xc0) >> 2);
         let result = a as i32 - k as i32;
         state.write_u16(addr, result as u16);
-        let mut sreg = state.sreg() & 0xc0;
+        let mut sreg = state.sreg() & 0xe0;
         if result == 0 {
             sreg |= 0x02;
         }
@@ -896,12 +884,6 @@ fn execute(state: &mut CpuState, opcode: u16) {
         }
         if k > a {
             sreg |= 0x01;
-        }
-        if (((!(a as u32)) & k as u32) | (k as u32 & result as u32) | (result as u32 & !(a as u32)))
-            & 1
-            != 0
-        {
-            sreg |= 0x20;
         }
         state.set_sreg(sreg);
         state.add_cycles(1);
@@ -1788,7 +1770,7 @@ mod tests {
         assert_eq!(cpu.pc(), 1);
         assert_eq!(cpu.cycles(), 1);
         assert_eq!(cpu.data_byte(20), 0xaa);
-        assert_eq!(cpu.sreg(), SREG_S | SREG_N | SREG_C);
+        assert_eq!(cpu.sreg(), SREG_H | SREG_S | SREG_N | SREG_C);
     }
 
     #[test]
@@ -2148,7 +2130,7 @@ mod tests {
         assert_eq!(cpu.pc(), 1);
         assert_eq!(cpu.cycles(), 1);
         assert_eq!(cpu.data_byte(0), 246);
-        assert_eq!(cpu.sreg(), SREG_S | SREG_N | SREG_C);
+        assert_eq!(cpu.sreg(), SREG_H | SREG_S | SREG_N | SREG_C);
     }
 
     #[test]

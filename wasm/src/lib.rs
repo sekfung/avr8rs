@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use avr8rs::{ArduinoUno, PinMode, PinState};
+use avr8rs::{ArduinoUno, PinMode, PinState, UNO_FLASH_WORDS};
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
@@ -13,25 +13,21 @@ pub struct Uno {
 #[wasm_bindgen]
 impl Uno {
     #[wasm_bindgen(constructor)]
-    pub fn new(image: &[u8], freq_hz: u32) -> Uno {
-        let mut bytes = image.to_vec();
-        if bytes.len() & 1 != 0 {
-            bytes.push(0xff);
+    pub fn new(image: &[u8], freq_hz: u32) -> Result<Uno, JsError> {
+        if image.len() > UNO_FLASH_WORDS * 2 {
+            return Err(JsError::new("image is larger than the ATmega328P flash"));
         }
-        let mut program = bytes
-            .chunks_exact(2)
-            .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
-            .collect::<Vec<_>>();
-        if program.is_empty() {
-            program.push(0);
+        let board = ArduinoUno::with_frequency(vec![0; UNO_FLASH_WORDS], freq_hz);
+        board.cpu().write_prog_bytes(image, 0);
+        if image.len() & 1 != 0 {
+            board.cpu().write_prog_bytes(&[0xff], image.len());
         }
-        let board = ArduinoUno::with_frequency(program, freq_hz);
         let serial = Rc::new(RefCell::new(Vec::new()));
         let sink = serial.clone();
         board.set_serial_callback(Some(Box::new(move |byte| {
             sink.borrow_mut().push(byte);
         })));
-        Uno { board, serial }
+        Ok(Uno { board, serial })
     }
 
     pub fn run(&self, instructions: usize) {

@@ -31,28 +31,36 @@ behaviour that upstream does not test:
 |---|---:|---|
 | `tests/timer_attiny_hook_chaining.rs` | 3 | Timer0/ATtiny shared-hook chaining |
 | `tests/regressions.rs` | 6 | GPIO re-entry, hook RAII, callback lifetimes, USART reset |
-| `tests/board.rs` | 2 | Arduino Uno pin mapping and digital I/O |
+| `tests/board.rs` | 6 | Arduino Uno pin mapping, SRAM, PWM, and reset |
+| `tests/cpu_review.rs` | 7 | Hook replacement, clock events, ALU flags, and 22-bit returns |
+| `tests/peripheral_review.rs` | 5 | Deferred GPIO, pull-ups, and interrupt flags |
 
-These do not change the `cargo test --lib` contract of exactly 347 tests.
+The library test target includes the 347 ported cases and additional regressions.
 
 ## Tooling layers
 
 - `board::ArduinoUno` maps Arduino pins 0-13 and A0-A5 to the ATmega328P
-  ports and instantiates USART0, Timer0, ADC, watchdog, and the clock.
-- `avr8rs-cli` runs raw little-endian flash images and can compile arbitrary
-  `.ino` sketches through the host `arduino-cli` toolchain.
-- `avr8rs-server` serves the demo and exposes `POST /compile` for arbitrary
+  ports and instantiates USART0, Timer0/1/2, ADC, watchdog, and the clock.
+- `avr8rs-cli` runs raw little-endian flash images and can compile Uno
+  sketches through the host `arduino-cli` toolchain.
+- `avr8rs-server` serves the demo and exposes `POST /compile` for Uno
   sketch text. Intel HEX parsing is not part of the crate.
 - `wasm/` exposes the board model through wasm-bindgen; `web/` contains a
   self-contained blink demo with prebuilt bindings.
 - `tools/differential/compare.mjs` compares random ALU/register programs with
   upstream avr8js 0.21.1.
 
-## Intentional deviation
+## Intentional deviations
 
 Malformed assembler input that upstream reports through internal JavaScript
 `TypeError`s gets a descriptive Rust error instead. This only affects the
 test-only assembler and is outside the 347 upstream cases.
+
+The CPU computes the H flag from bit 3 and restores the full 22-bit PC on
+`RET` and `RETI`. The peripheral models include undriven GPIO pull-ups in
+PIN reads, update pending pin-change interrupts on PCICR writes, and preserve
+unselected flags on write-one-to-clear timer and ADC registers. A few ported
+assertions reflect these hardware behaviors.
 
 ## Public export map
 

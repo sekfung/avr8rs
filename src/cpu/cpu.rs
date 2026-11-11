@@ -1,8 +1,9 @@
 use std::cell::{Ref, RefCell, RefMut};
+use std::collections::HashMap;
 use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
 use std::rc::{Rc, Weak};
 
-use crate::peripherals::gpio::IoPort;
+use crate::peripherals::gpio::{IoPort, PendingPinSets};
 
 use super::interrupt::avr_interrupt_state;
 
@@ -19,7 +20,8 @@ pub type CpuMemoryHook = CpuWriteHook;
 /// Sparse-by-address memory write hook table, matching upstream `CPUMemoryHooks`.
 pub type CpuMemoryHooks = Vec<Option<CpuMemoryHook>>;
 
-type ClockEventCallback = Rc<RefCell<Box<dyn FnMut(&mut CpuState)>>>;
+type SharedCallback<T> = Rc<RefCell<T>>;
+type ClockEventCallback = SharedCallback<Box<dyn FnMut(&mut CpuState)>>;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct ClockEventId(pub u64);
@@ -51,16 +53,17 @@ pub struct CpuState {
     pc: u32,
     cycles: u64,
     pc22_bits: bool,
-    read_hooks: Vec<Option<CpuReadHook>>,
-    write_hooks: Vec<Option<CpuWriteHook>>,
+    read_hooks: Vec<Option<SharedCallback<CpuReadHook>>>,
+    write_hooks: Vec<Option<SharedCallback<CpuWriteHook>>>,
     clock_events: Vec<ClockEventEntry>,
-    clock_callbacks: Vec<Option<ClockEventCallback>>,
+    clock_callbacks: HashMap<u64, ClockEventCallback>,
     next_clock_event_id: u64,
     pending_interrupts: Vec<Option<InterruptConfig>>,
     next_interrupt: i16,
     max_interrupt: i16,
     pub(crate) gpio_ports: Vec<IoPort>,
     pub(crate) gpio_by_port: Vec<Option<IoPort>>,
+    pub(crate) pending_pin_sets: Rc<PendingPinSets>,
     on_watchdog_reset: Box<dyn FnMut(&mut CpuState)>,
 }
 
@@ -98,15 +101,20 @@ impl Cpu {
     }
 
     pub fn read_data(&self, addr: u16) -> u8 {
-        self.0.borrow_mut().read_data(addr)
+        let mut state = self.0.borrow_mut();
+        let value = state.read_data(addr);
+        state.drain_pending_pin_sets();
+        value
     }
 
     pub fn write_data(&self, addr: u16, value: u8) {
-        self.0.borrow_mut().write_data(addr, value);
+        self.write_data_masked(addr, value, 0xff);
     }
 
     pub fn write_data_masked(&self, addr: u16, value: u8, mask: u8) {
-        self.0.borrow_mut().write_data_masked(addr, value, mask);
+        let mut state = self.0.borrow_mut();
+        state.write_data_masked(addr, value, mask);
+        state.drain_pending_pin_sets();
     }
 
     pub fn data(&self) -> Ref<'_, [u8]> {
@@ -255,16 +263,17 @@ impl CpuState {
             pc: 0,
             cycles: 0,
             pc22_bits,
-            read_hooks: std::iter::repeat_with(|| None).take(hook_count).collect(),
-            write_hooks: std::iter::repeat_with(|| None).take(hook_count).collect(),
+            read_hooks: vec![None; hook_count],
+            write_hooks: vec![None; hook_count],
             clock_events: Vec::new(),
-            clock_callbacks: Vec::new(),
+            clock_callbacks: HashMap::new(),
             next_clock_event_id: 0,
             pending_interrupts: vec![None; MAX_INTERRUPTS],
             next_interrupt: -1,
             max_interrupt: 0,
             gpio_ports: Vec::new(),
             gpio_by_port: Vec::new(),
+            pending_pin_sets: Rc::default(),
             on_watchdog_reset: Box::new(|_| {}),
         }
     }
@@ -275,13 +284,27 @@ impl CpuState {
         self.pending_interrupts.fill(None);
         self.next_interrupt = -1;
         self.clock_events.clear();
-        for callback in &mut self.clock_callbacks {
-            *callback = None;
-        }
+        self.clock_callbacks.clear();
     }
 
     pub fn sram_bytes(&self) -> usize {
         self.data.len() - REGISTER_SPACE
+    }
+
+    pub(crate) fn reset_io_registers(&mut self) {
+        self.data[32..REGISTER_SPACE].fill(0);
+        self.pending_pin_sets.borrow_mut().clear();
+    }
+
+    pub(crate) fn drain_pending_pin_sets(&mut self) {
+        loop {
+            // Release the queue borrow before dispatch, since a callback can enqueue more input.
+            let pending = self.pending_pin_sets.borrow_mut().pop_front();
+            let Some((port, index, value)) = pending else {
+                break;
+            };
+            port.set_pin_with(self, index, value);
+        }
     }
 
     pub fn data(&self) -> &[u8] {
@@ -316,16 +339,10 @@ impl CpuState {
             return 0;
         }
         if addr >= 32 {
-            let hook = self
-                .read_hooks
-                .get_mut(addr as usize)
-                .and_then(Option::take);
-            if let Some(mut hook) = hook {
-                let result = catch_unwind(AssertUnwindSafe(|| hook(self, addr)));
-                self.read_hooks[addr as usize] = Some(hook);
-                match result {
-                    Ok(value) => return value,
-                    Err(payload) => resume_unwind(payload),
+            if let Some(hook) = self.read_hooks[addr as usize].clone() {
+                // The active hook is bypassed if it reads its own address.
+                if let Ok(mut hook) = hook.try_borrow_mut() {
+                    return hook(self, addr);
                 }
             }
         }
@@ -340,22 +357,12 @@ impl CpuState {
         if addr as usize >= self.data.len() {
             return;
         }
-        let hook = self
-            .write_hooks
-            .get_mut(addr as usize)
-            .and_then(Option::take);
-        if let Some(mut hook) = hook {
-            let old_value = self.data[addr as usize];
-            let result = catch_unwind(AssertUnwindSafe(|| {
-                hook(self, value, old_value, addr, mask)
-            }));
-            self.write_hooks[addr as usize] = Some(hook);
-            let suppress = match result {
-                Ok(suppress) => suppress,
-                Err(payload) => resume_unwind(payload),
-            };
-            if suppress {
-                return;
+        if let Some(hook) = self.write_hooks[addr as usize].clone() {
+            if let Ok(mut hook) = hook.try_borrow_mut() {
+                let old_value = self.data[addr as usize];
+                if hook(self, value, old_value, addr, mask) {
+                    return;
+                }
             }
         }
         self.data[addr as usize] = value;
@@ -363,20 +370,19 @@ impl CpuState {
 
     pub fn set_read_hook(&mut self, addr: u16, hook: CpuReadHook) {
         if let Some(slot) = self.read_hooks.get_mut(addr as usize) {
-            *slot = Some(hook);
+            *slot = Some(Rc::new(RefCell::new(hook)));
         }
     }
 
     pub fn set_write_hook(&mut self, addr: u16, hook: CpuWriteHook) {
         if let Some(slot) = self.write_hooks.get_mut(addr as usize) {
-            *slot = Some(hook);
+            *slot = Some(Rc::new(RefCell::new(hook)));
         }
     }
 
     pub(crate) fn take_write_hook(&mut self, addr: u16) -> Option<CpuWriteHook> {
-        self.write_hooks
-            .get_mut(addr as usize)
-            .and_then(Option::take)
+        let hook = self.write_hooks.get_mut(addr as usize)?.take()?;
+        Rc::try_unwrap(hook).ok().map(RefCell::into_inner)
     }
 
     pub fn clear_read_hook(&mut self, addr: u16) {
@@ -483,18 +489,14 @@ impl CpuState {
         let id = ClockEventId(self.next_clock_event_id);
         self.next_clock_event_id += 1;
         self.clock_callbacks
-            .push(Some(Rc::new(RefCell::new(callback))));
+            .insert(id.0, Rc::new(RefCell::new(callback)));
         let due = self.cycles.saturating_add(delay_cycles.max(1));
         self.insert_clock_event(due, id);
         id
     }
 
     pub fn update_clock_event(&mut self, id: ClockEventId, delay_cycles: u64) -> bool {
-        let known = self
-            .clock_callbacks
-            .get(id.0 as usize)
-            .is_some_and(Option::is_some);
-        if !known {
+        if !self.clock_callbacks.contains_key(&id.0) {
             return false;
         }
         self.clock_events.retain(|event| event.id != id);
@@ -504,14 +506,8 @@ impl CpuState {
     }
 
     pub fn clear_clock_event(&mut self, id: ClockEventId) -> bool {
-        let previous_len = self.clock_events.len();
         self.clock_events.retain(|event| event.id != id);
-        let had_entry = self.clock_events.len() != previous_len;
-        let had_callback = self
-            .clock_callbacks
-            .get_mut(id.0 as usize)
-            .is_some_and(|slot| slot.take().is_some());
-        had_entry || had_callback
+        self.clock_callbacks.remove(&id.0).is_some()
     }
 
     fn insert_clock_event(&mut self, due: u64, id: ClockEventId) {
@@ -526,23 +522,22 @@ impl CpuState {
             .filter(|event| event.due <= self.cycles)
             .map(|event| event.id)
         {
-            self.clock_events.retain(|event| event.id != id);
-            let callback = self
+            self.clock_events.remove(0);
+            // Keep the callback available while it runs so it can reschedule itself.
+            let result = self
                 .clock_callbacks
-                .get(id.0 as usize)
-                .and_then(Clone::clone);
-            if let Some(callback) = callback {
-                let mut callback = callback.borrow_mut();
-                let function = &mut *callback;
-                function(self);
-            }
+                .get(&id.0)
+                .cloned()
+                .map(|callback| catch_unwind(AssertUnwindSafe(|| callback.borrow_mut()(self))));
             if !self.clock_events.iter().any(|event| event.id == id) {
-                if let Some(slot) = self.clock_callbacks.get_mut(id.0 as usize) {
-                    *slot = None;
-                }
+                self.clock_callbacks.remove(&id.0);
+            }
+            if let Some(Err(payload)) = result {
+                resume_unwind(payload);
             }
         }
 
+        self.drain_pending_pin_sets();
         self.process_interrupt();
     }
 
@@ -678,6 +673,7 @@ mod tests {
                 cpu.tick();
             }
             assert_eq!(events.calls(), vec![(1, 1), (4, 4), (10, 10)]);
+            assert!(cpu.0.borrow().clock_callbacks.is_empty());
         }
 
         #[test]

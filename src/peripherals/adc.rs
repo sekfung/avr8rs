@@ -241,8 +241,8 @@ impl Adc {
         let writer = adc.clone();
         cpu.set_write_hook(
             adcsra,
-            Box::new(move |cpu, value, old_value, _addr, _mask| {
-                writer.handle_adcsra_write(cpu, value, old_value)
+            Box::new(move |cpu, value, old_value, _addr, mask| {
+                writer.handle_adcsra_write(cpu, value, old_value, mask)
             }),
         );
 
@@ -340,13 +340,21 @@ impl Adc {
         self.0.borrow_mut().on_adc_read = callback;
     }
 
-    fn handle_adcsra_write(&self, cpu: &mut CpuState, value: u8, old_value: u8) -> bool {
+    pub(crate) fn reset_after_cpu(&self) {
+        let mut adc = self.0.borrow_mut();
+        adc.converting = false;
+        adc.conversion_cycles = 25;
+    }
+
+    fn handle_adcsra_write(&self, cpu: &mut CpuState, value: u8, old_value: u8, mask: u8) -> bool {
         let mut adc = self.0.borrow_mut();
         if value & ADEN != 0 && old_value & ADEN == 0 {
             adc.conversion_cycles = 25;
         }
 
-        cpu.set_data_byte(adc.config.adcsra, value);
+        cpu.clear_interrupt_by_flag(adc.adc_interrupt, value & mask);
+        let flag = cpu.data_byte(adc.config.adcsra) & ADIF;
+        cpu.set_data_byte(adc.config.adcsra, (value & !ADIF) | flag);
         cpu.update_interrupt_enable(adc.adc_interrupt, value);
 
         if adc.converting || value & ADSC == 0 {
