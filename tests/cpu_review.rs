@@ -83,6 +83,21 @@ fn return_uses_all_three_address_bytes_at_word_boundary() {
 }
 
 #[test]
+fn instruction_wraps_pc_for_empty_and_non_power_of_two_flash() {
+    let cpu = Cpu::new(vec![0; 3]);
+    for (start, expected) in [(1, 2), (2, 0), (7, 2), (u32::MAX, 0)] {
+        cpu.set_pc(start);
+        avr_instruction(&cpu);
+        assert_eq!(cpu.pc(), expected);
+    }
+
+    let empty = Cpu::new(vec![]);
+    empty.run_instructions(2);
+    assert_eq!(empty.pc(), 0);
+    assert_eq!(empty.cycles(), 2);
+}
+
+#[test]
 fn write_hook_can_clear_itself() {
     let cpu = Cpu::new(vec![0]);
     let calls = Rc::new(Cell::new(0));
@@ -116,6 +131,22 @@ fn read_hook_replacement_survives_unwind() {
     );
     assert!(catch_unwind(AssertUnwindSafe(|| cpu.read_data(0x100))).is_err());
     assert_eq!(cpu.read_data(0x100), 0x42);
+}
+
+#[test]
+fn a_memory_hook_can_install_another_hook_at_the_end_of_sram() {
+    let cpu = Cpu::with_sram(vec![0], 0xff00);
+    cpu.set_read_hook(
+        0x20,
+        Box::new(|state, _| {
+            state.set_read_hook(u16::MAX, Box::new(|_, _| 0x42));
+            state.read_data(u16::MAX)
+        }),
+    );
+    assert_eq!(cpu.read_data(0x20), 0x42);
+    assert_eq!(cpu.read_data(u16::MAX), 0x42);
+    cpu.clear_read_hook(u16::MAX);
+    assert_eq!(cpu.read_data(u16::MAX), 0);
 }
 
 #[test]

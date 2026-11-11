@@ -7,9 +7,16 @@ pub fn avr_instruction(cpu: &Cpu) {
 
 pub(crate) fn avr_instruction_state(state: &mut CpuState) {
     let opcode = state.prog_word(state.pc());
-    execute(state, opcode);
+    if opcode != 0 {
+        execute(state, opcode);
+    }
     let program_len = (state.prog_bytes().len() / 2) as u32;
-    state.set_pc(state.pc().wrapping_add(1) % program_len.max(1));
+    let next_pc = state.pc().wrapping_add(1);
+    state.set_pc(if next_pc < program_len {
+        next_pc
+    } else {
+        next_pc % program_len.max(1)
+    });
     state.add_cycles(1);
     state.drain_pending_pin_sets();
 }
@@ -118,7 +125,16 @@ fn set_sub_carry_flags(state: &mut CpuState, val1: u8, val2: u8, result: i32, ol
 }
 
 fn execute(state: &mut CpuState, opcode: u16) {
-    if (opcode & 0xfc00) == 0x1c00 {
+    if (opcode & 0xf000) == 0xc000 {
+        /* RJMP, 1100 kkkk kkkk kkkk */
+        let offset = ((opcode & 0x7ff) as i64) - if opcode & 0x800 != 0 { 0x800 } else { 0 };
+        state.set_pc((state.pc() as i64 + offset) as u32);
+        state.add_cycles(1);
+    } else if (opcode & 0xf000) == 0xe000 {
+        /* LDI, 1110 KKKK dddd KKKK */
+        let k = ((opcode & 0x0f) | ((opcode & 0xf00) >> 4)) as u8;
+        set_data(state, 16 + ((opcode & 0xf0) >> 4), k);
+    } else if (opcode & 0xfc00) == 0x1c00 {
         /* ADC, 0001 11rd dddd rrrr */
         let d_addr = reg_d(opcode);
         let r_addr = reg_r(opcode);
@@ -525,10 +541,6 @@ fn execute(state: &mut CpuState, opcode: u16) {
         let value = state.read_data(z);
         state.write_data(z, r ^ value);
         set_data(state, r_addr, value);
-    } else if (opcode & 0xf000) == 0xe000 {
-        /* LDI, 1110 KKKK dddd KKKK */
-        let k = ((opcode & 0x0f) | ((opcode & 0xf00) >> 4)) as u8;
-        set_data(state, 16 + ((opcode & 0xf0) >> 4), k);
     } else if (opcode & 0xfe0f) == 0x9000 {
         /* LDS, 1001 000d dddd 0000 kkkk kkkk kkkk kkkk */
         state.add_cycles(1);
@@ -731,8 +743,6 @@ fn execute(state: &mut CpuState, opcode: u16) {
             sreg |= 0x20;
         }
         state.set_sreg(sreg);
-    } else if opcode == 0 {
-        /* NOP, 0000 0000 0000 0000 */
     } else if (opcode & 0xfc00) == 0x2800 {
         /* OR, 0010 10rd dddd rrrr */
         let result = data(state, reg_d(opcode)) | data(state, reg_r(opcode));
@@ -788,11 +798,6 @@ fn execute(state: &mut CpuState, opcode: u16) {
         if opcode == 0x9518 {
             state.set_sreg(state.sreg() | 0x80);
         }
-    } else if (opcode & 0xf000) == 0xc000 {
-        /* RJMP, 1100 kkkk kkkk kkkk */
-        let offset = ((opcode & 0x7ff) as i64) - if opcode & 0x800 != 0 { 0x800 } else { 0 };
-        state.set_pc((state.pc() as i64 + offset) as u32);
-        state.add_cycles(1);
     } else if (opcode & 0xfe0f) == 0x9407 {
         /* ROR, 1001 010d dddd 0111 */
         let d_addr = reg_d(opcode);

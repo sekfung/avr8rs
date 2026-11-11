@@ -32,8 +32,8 @@ behaviour that upstream does not test:
 | `tests/timer_attiny_hook_chaining.rs` | 3 | Timer0/ATtiny shared-hook chaining |
 | `tests/regressions.rs` | 6 | GPIO re-entry, hook RAII, callback lifetimes, USART reset |
 | `tests/board.rs` | 6 | Arduino Uno pin mapping, SRAM, PWM, and reset |
-| `tests/cpu_review.rs` | 7 | Hook replacement, clock events, ALU flags, and 22-bit returns |
-| `tests/peripheral_review.rs` | 5 | Deferred GPIO, pull-ups, and interrupt flags |
+| `tests/cpu_review.rs` | 9 | Hook replacement, clock events, ALU flags, PC wrapping, and 22-bit returns |
+| `tests/peripheral_review.rs` | 7 | Deferred GPIO, pull-ups, interrupt flags, and timer catch-up |
 
 The library test target includes the 347 ported cases and additional regressions.
 

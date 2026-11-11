@@ -775,17 +775,26 @@ impl TimerState {
         let delta = cycles.saturating_sub(self.last_cycle);
 
         if (divider != 0 && delta >= divider) || external {
-            let counter_delta = if external { 1 } else { delta / divider };
+            let counter_delta = if external {
+                1
+            } else if divider.is_power_of_two() {
+                delta >> divider.trailing_zeros()
+            } else {
+                delta / divider
+            };
             self.last_cycle += counter_delta * divider;
             let value = self.tcnt;
             let top = self.top();
             let phase_pwm = self.is_phase_pwm();
+            let count = value as u64 + counter_delta;
+            let overflow = count > top as u64;
             let new_value = if phase_pwm {
                 self.phase_pwm_count(state, value, counter_delta)
+            } else if overflow {
+                (count % (top as u64 + 1)) as u16
             } else {
-                ((value as u64 + counter_delta) % (top as u64 + 1)) as u16
+                count as u16
             };
-            let overflow = value as u64 + counter_delta > top as u64;
 
             // A CPU write overrides (has priority over) all counter clear or count operations.
             if !self.tcnt_updated {

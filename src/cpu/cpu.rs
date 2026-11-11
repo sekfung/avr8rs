@@ -230,15 +230,14 @@ impl Cpu {
     }
 
     pub fn step(&self) {
-        super::avr_instruction(self);
-        self.tick();
+        self.run_instructions(1);
     }
 
     pub fn run_instructions(&self, count: usize) {
         let mut state = self.0.borrow_mut();
         for _ in 0..count {
             super::avr_instruction_state(&mut state);
-            state.tick();
+            state.tick_inner(false);
         }
     }
 
@@ -255,7 +254,6 @@ impl CpuState {
             .flat_map(|word| word.to_le_bytes())
             .collect();
         let pc22_bits = prog_bytes.len() > 0x20000;
-        let hook_count = data.len();
         Self {
             data,
             prog_mem,
@@ -263,8 +261,8 @@ impl CpuState {
             pc: 0,
             cycles: 0,
             pc22_bits,
-            read_hooks: vec![None; hook_count],
-            write_hooks: vec![None; hook_count],
+            read_hooks: Vec::new(),
+            write_hooks: Vec::new(),
             clock_events: Vec::new(),
             clock_callbacks: HashMap::new(),
             next_clock_event_id: 0,
@@ -335,18 +333,15 @@ impl CpuState {
     }
 
     pub fn read_data(&mut self, addr: u16) -> u8 {
-        if addr as usize >= self.data.len() {
-            return 0;
-        }
         if addr >= 32 {
-            if let Some(hook) = self.read_hooks[addr as usize].clone() {
+            if let Some(hook) = self.read_hooks.get(addr as usize).cloned().flatten() {
                 // The active hook is bypassed if it reads its own address.
                 if let Ok(mut hook) = hook.try_borrow_mut() {
                     return hook(self, addr);
                 }
             }
         }
-        self.data[addr as usize]
+        self.data_byte(addr)
     }
 
     pub fn write_data(&mut self, addr: u16, value: u8) {
@@ -354,30 +349,39 @@ impl CpuState {
     }
 
     pub fn write_data_masked(&mut self, addr: u16, value: u8, mask: u8) {
-        if addr as usize >= self.data.len() {
-            return;
-        }
-        if let Some(hook) = self.write_hooks[addr as usize].clone() {
+        if let Some(hook) = self.write_hooks.get(addr as usize).cloned().flatten() {
             if let Ok(mut hook) = hook.try_borrow_mut() {
-                let old_value = self.data[addr as usize];
+                let old_value = self.data_byte(addr);
                 if hook(self, value, old_value, addr, mask) {
                     return;
                 }
             }
         }
-        self.data[addr as usize] = value;
+        self.set_data_byte(addr, value);
     }
 
     pub fn set_read_hook(&mut self, addr: u16, hook: CpuReadHook) {
-        if let Some(slot) = self.read_hooks.get_mut(addr as usize) {
-            *slot = Some(Rc::new(RefCell::new(hook)));
-        }
+        Self::set_memory_hook(&mut self.read_hooks, self.data.len(), addr, hook);
     }
 
     pub fn set_write_hook(&mut self, addr: u16, hook: CpuWriteHook) {
-        if let Some(slot) = self.write_hooks.get_mut(addr as usize) {
-            *slot = Some(Rc::new(RefCell::new(hook)));
+        Self::set_memory_hook(&mut self.write_hooks, self.data.len(), addr, hook);
+    }
+
+    fn set_memory_hook<T>(
+        slots: &mut Vec<Option<SharedCallback<T>>>,
+        data_len: usize,
+        addr: u16,
+        hook: T,
+    ) {
+        let index = addr as usize;
+        if index >= data_len {
+            return;
         }
+        if index >= slots.len() {
+            slots.resize_with(index + 1, || None);
+        }
+        slots[index] = Some(Rc::new(RefCell::new(hook)));
     }
 
     pub(crate) fn take_write_hook(&mut self, addr: u16) -> Option<CpuWriteHook> {
@@ -516,6 +520,10 @@ impl CpuState {
     }
 
     pub fn tick(&mut self) {
+        self.tick_inner(true);
+    }
+
+    fn tick_inner(&mut self, mut drain_pin_sets: bool) {
         if let Some(id) = self
             .clock_events
             .first()
@@ -535,9 +543,13 @@ impl CpuState {
             if let Some(Err(payload)) = result {
                 resume_unwind(payload);
             }
+            drain_pin_sets = true;
         }
 
-        self.drain_pending_pin_sets();
+        // The instruction already drained the queue. Clock callbacks can add more inputs.
+        if drain_pin_sets {
+            self.drain_pending_pin_sets();
+        }
         self.process_interrupt();
     }
 

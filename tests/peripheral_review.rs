@@ -34,6 +34,26 @@ fn deferred_gpio_updates_run_in_order_across_ports() {
 }
 
 #[test]
+fn deferred_gpio_updates_bracket_the_clock_event_during_a_step() {
+    let steps: [fn(&Cpu); 2] = [Cpu::step, |cpu| cpu.run_instructions(1)];
+    for step in steps {
+        let cpu = Cpu::new(vec![0x9a28]); // SBI PORTB, 0
+        let port = IoPort::new(cpu.clone(), port_b_config());
+        let input = port.clone();
+        port.add_listener(Box::new(move |_, _, _| input.set_pin(1, true)));
+        cpu.add_clock_event(
+            Box::new(move |state| {
+                assert_eq!(state.data_byte(0x23) & 0b110, 0b010);
+                port.set_pin(2, true);
+            }),
+            1,
+        );
+        step(&cpu);
+        assert_eq!(cpu.data_byte(0x23) & 0b110, 0b110);
+    }
+}
+
+#[test]
 fn a_driven_low_pin_overrides_its_pullup() {
     let cpu = Cpu::new(vec![0]);
     let port = IoPort::new(cpu.clone(), port_b_config());
@@ -72,6 +92,24 @@ fn timer_flag_write_only_clears_selected_flags() {
     assert_eq!(cpu.read_data(config.tifr), config.ocfb);
     cpu.write_data(config.tifr, 0);
     assert_eq!(cpu.read_data(config.tifr), config.ocfb);
+}
+
+#[test]
+fn timer_catches_up_across_multiple_wraps_with_a_custom_divider() {
+    let cpu = Cpu::new(vec![0]);
+    let mut config = timer0_config();
+    config.dividers[1] = 3;
+    let _timer = Timer::new(cpu.clone(), config);
+    cpu.write_data(config.tccrb, 1);
+    cpu.step();
+
+    cpu.add_cycles(3 * 769 + 2);
+    cpu.tick();
+    assert_eq!(cpu.read_data(config.tcnt), 1);
+    assert_ne!(cpu.data_byte(config.tifr) & config.tov, 0);
+
+    cpu.step();
+    assert_eq!(cpu.read_data(config.tcnt), 2);
 }
 
 #[test]

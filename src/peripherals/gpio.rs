@@ -655,15 +655,18 @@ impl IoPort {
     }
 
     fn refresh_pin_register(&self, state: &mut CpuState, ddr: u8) {
-        let (pin_addr, new_pin, transitions) = {
-            let mut port_state = self.0.borrow_mut();
-            let pin_addr = port_state.config.pin;
-            let (new_pin, transitions) = port_state.recompute_pin(ddr);
-            (pin_addr, new_pin, transitions)
+        let (pin_addr, new_pin, mut changed) = {
+            let port = self.0.borrow();
+            let inputs = port.pin_value | (port.port_value & !port.driven_pins);
+            let new_pin = (inputs & !ddr) | (port.last_value & ddr);
+            (port.config.pin, new_pin, new_pin ^ port.last_pin)
         };
         state.set_data_byte(pin_addr, new_pin);
 
-        for (index, rising) in transitions {
+        while changed != 0 {
+            let index = changed.trailing_zeros() as u8;
+            let rising = new_pin & (1 << index) != 0;
+            changed &= changed - 1;
             self.toggle_interrupt(state, index, rising);
             self.notify_external_clock_listener(state, index, rising);
         }
@@ -743,22 +746,6 @@ impl IoPortState {
             PinOverrideMode::Clear => self.override_value &= !pin_mask,
             PinOverrideMode::Toggle => self.override_value ^= pin_mask,
         }
-    }
-
-    fn recompute_pin(&mut self, ddr: u8) -> (u8, Vec<(u8, bool)>) {
-        let inputs = self.pin_value | (self.port_value & !self.driven_pins);
-        let new_pin = (inputs & !ddr) | (self.last_value & ddr);
-        let old_pin = self.last_pin;
-        let mut transitions = Vec::new();
-        if old_pin != new_pin {
-            for index in 0..8 {
-                let bit_mask = 1u8 << index;
-                if (new_pin & bit_mask) != (old_pin & bit_mask) {
-                    transitions.push((index, new_pin & bit_mask != 0));
-                }
-            }
-        }
-        (new_pin, transitions)
     }
 }
 
